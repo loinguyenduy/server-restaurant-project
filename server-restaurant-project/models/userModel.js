@@ -1,19 +1,19 @@
-import { DataTypes } from 'sequelize';
-import { sequelize } from '../config/database.js';
+import { DataTypes } from "sequelize";
+import { sequelize } from "../config/databaseConfig.js";
 
 const User = sequelize.define(
-  'User',
+  "User",
   {
     id: {
       type: DataTypes.UUID,
-      defaultValue:DataTypes.UUIDV4,
-      primaryKey: true
+      defaultValue: DataTypes.UUIDV4,
+      primaryKey: true,
     },
     email: {
       type: DataTypes.STRING,
       allowNull: false,
       unique: true,
-      validate: {isEmail: true}
+      validate: { isEmail: true },
     },
     password: {
       type: DataTypes.STRING,
@@ -22,28 +22,28 @@ const User = sequelize.define(
     username: {
       type: DataTypes.STRING,
       allowNull: false,
-      unique: true
+      unique: true,
     },
     full_name: {
       type: DataTypes.STRING,
       allowNull: false,
     },
     phone_number: {
-      type: DataTypes.STRING, 
+      type: DataTypes.STRING,
       allowNull: true,
     },
     role: {
-        type: DataTypes.ENUM('admin', 'staff', 'customer'),
-        defaultValue: 'customer'
+      type: DataTypes.ENUM("admin", "staff", "customer"),
+      defaultValue: "customer",
     },
     avatar_url: {
-        type: DataTypes.STRING,
-        allowNull: true
-    }
-  }, 
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
+  },
   {
-    tableName: 'users'
-  }
+    tableName: "users",
+  },
 );
 
 export default User;

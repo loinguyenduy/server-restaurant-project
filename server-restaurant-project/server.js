@@ -2,7 +2,7 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import cookieParser from "cookie-parser";
-import { connectDB, sequelize } from "./config/database.js";
+import { connectDB, sequelize } from "./config/databaseConfig.js";
 import "./models/index.js";
 import apiRoutes from "./routes/apiRoutes.js";
 
