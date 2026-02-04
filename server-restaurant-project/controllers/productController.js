@@ -2,7 +2,9 @@ import { createProduct, getProducts } from "../services/productService.js";
 
 const getAllProducts = async (req, res) => {
   try {
-    let data = await getProducts();
+    const filterCategory = {category_id: req.query.category_id}
+    let data = await getProducts(filterCategory);
+    
     return res.status(200).json({
       EM: data.EM,
       EC: data.EC,

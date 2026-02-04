@@ -1,11 +1,21 @@
 import { Product, Category } from "../models/index.js";
 
-const getProducts = async () => {
+const getProducts = async (categoryFilterId) => {
   try {
+    //const category_id = categoryFilterId.category_id
+    const {category_id} = categoryFilterId //destructuring
+    let whereCondition = {}
+
+    if(category_id && category_id !== 'all'){
+      whereCondition.category_id = category_id
+    }
+    // console.log(">>> Check whereCondition:", whereCondition);
+
     let data = await Product.findAll({
-      order: [["name", "ASC"]],
+      order: [['createdAt', 'DESC']],
       attributes: { exclude: ["createdAt", "updatedAt"] },
       include: [{ model: Category, attributes: ["name"] }],
+      where: whereCondition
     });
 
     return {
@@ -50,9 +60,9 @@ const createProduct = async (productData) => {
 
     //check category_id exist
     let checkCategory = await Category.findOne({
-      where: {id: category_id},
-    })
-    if(!checkCategory) {
+      where: { id: category_id },
+    });
+    if (!checkCategory) {
       return {
         EM: "Category ID is not available.",
         EC: 404,

@@ -2,7 +2,7 @@ import { Category } from "../models/index.js";
 
 const getCategories = async () => {
   try {
-    let data = await Category.findAll({order: [["name", "ASC"]]});
+    let data = await Category.findAll({ order: [["name", "ASC"]] });
     return {
       EM: "Get all categories successfully.",
       EC: 0,
