@@ -11,7 +11,7 @@ const getAllCategories = async (req, res) => {
   } catch (error) {
     console.log("Error in getAllCategories server: ", error);
     return res.status(500).json({
-      EM: "Error in getAllCategories server.",
+      EM: "Something wrongs in server...",
       EC: 500,
       DT: [],
     });
@@ -37,7 +37,7 @@ const createNewCategory = async (req, res) => {
   } catch (error) {
     console.log("Error in createNewCategory server: ", error);
     return res.status(500).json({
-      EM: "Error in createNewCategory server.",
+      EM: "Something wrongs in server...",
       EC: 500,
       DT: [],
     });

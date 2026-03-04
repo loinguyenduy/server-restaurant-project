@@ -20,7 +20,7 @@ const getAllProducts = async (req, res) => {
   } catch (error) {
     console.log("Error in getAllProducts server: ", error);
     return res.status(500).json({
-      EM: "Error in getAllProducts server.",
+      EM: "Something wrongs in server...",
       EC: 500,
       DT: [],
     });
@@ -106,7 +106,7 @@ const createNewProduct = async (req, res) => {
   } catch (error) {
     console.log("Error in createNewProduct server: ", error);
     return res.status(500).json({
-      EM: "Error in createNewProduct server.",
+      EM: "Something wrongs in server...",
       EC: 500,
       DT: [],
     });

@@ -59,7 +59,7 @@ const getProducts = async (options) => {
   } catch (error) {
     console.log("Error in getProducts service: ", error);
     return {
-      EM: "Error in getProducts service.",
+      EM: "Something wrongs in service...",
       EC: 500,
       DT: []
     };
@@ -123,7 +123,7 @@ const createProduct = async (productData) => {
   } catch (error) {
     console.log("Error in createProduct service: ", error);
     return {
-      EM: "Error in createProduct service.",
+      EM: "Something wrongs in service...",
       EC: 500,
       DT: [],
     };
