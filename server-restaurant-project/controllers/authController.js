@@ -1,9 +1,17 @@
-import { handleRegisterUser } from "../services/authService.js";
+import {
+  handleLoginUser,
+  handleRegisterUser,
+} from "../services/authService.js";
 
 const registerNewUser = async (req, res) => {
   try {
     // Check missing input fields
-    if (!req.body.email || !req.body.password || !req.body.full_name || !req.body.username) {
+    if (
+      !req.body.email ||
+      !req.body.password ||
+      !req.body.full_name ||
+      !req.body.username
+    ) {
       return res.status(400).json({
         EM: "Missing required parameters.",
         EC: 400,
@@ -36,4 +44,30 @@ const registerNewUser = async (req, res) => {
   }
 };
 
-export { registerNewUser };
+const loginUser = async (req, res) => {
+  try {
+    //Check missing input
+    if (!req.body.valueLogin || !req.body.password) {
+      return res.status(400).json({
+        EM: "Missing your account or password.",
+        EC: 400,
+        DT: "",
+      });
+    }
+
+    let data = await handleLoginUser(req.body);
+    return res.status(200).json({
+      EM: data.EM,
+      EC: data.EC,
+      DT: data.DT,
+    });
+  } catch (error) {
+    console.log("Error in loginUser server: ", error);
+    return res.status(500).json({
+      EM: "Something wrongs in server...",
+      EC: 500,
+      DT: [],
+    });
+  }
+};
+export { registerNewUser, loginUser };

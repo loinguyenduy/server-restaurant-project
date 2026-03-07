@@ -146,4 +146,52 @@ const handleRegisterUser = async (rawUserData) => {
   }
 };
 
-export { handleRegisterUser };
+const checkPassword = async (inputPassword, hashPassword) => {
+  return await bcrypt.compare(inputPassword, hashPassword);
+};
+
+const handleLoginUser = async (inputUserData) => {
+  try {
+    let user = await User.findOne({
+      where: {
+        [Op.or]: [
+          { email: inputUserData.valueLogin },
+          { phone_number: inputUserData.valueLogin },
+        ],
+      },
+    });
+
+    if (user) {
+      let isCorrectPassword = await checkPassword(
+        inputUserData.password,
+        user.password,
+      );
+
+      if (isCorrectPassword) {
+        let userData = user.get({ plain: true });
+        delete userData.password;
+
+        return {
+          EM: "Login successfully.",
+          EC: 0,
+          DT: userData, 
+        };
+      }
+    }
+
+    return {
+      EM: "Your email/phone number or password is incorrect.",
+      EC: 401,
+      DT: "",
+    };
+  } catch (error) {
+    console.log(error);
+    return {
+      EM: "Something wrongs in service...",
+      EC: 500,
+      DT: "",
+    };
+  }
+};
+
+export { handleRegisterUser, handleLoginUser };

@@ -42,6 +42,12 @@ const User = sequelize.define(
     phone_number: {
       type: DataTypes.STRING,
       allowNull: true,
+      validate: {
+        is: {
+          args: /^[0-9]+$/,
+          msg: "Phone number must only contain numbers."
+        }
+      }
     },
     role: {
       type: DataTypes.ENUM("admin", "staff", "customer"),
