@@ -1,7 +1,10 @@
 import {
   handleLoginUser,
+  handleRefreshToken,
   handleRegisterUser,
 } from "../services/authService.js";
+import dotenv from "dotenv";
+dotenv.config();
 
 const registerNewUser = async (req, res) => {
   try {
@@ -56,6 +59,21 @@ const loginUser = async (req, res) => {
     }
 
     let data = await handleLoginUser(req.body);
+    // console.log("check data: ", data)
+
+    if (data && data.EC === 0) {
+      res.cookie("refreshToken", data.DT.refreshToken, {
+        httpOnly: true,
+        secure: false,
+        sameSite: "strict",
+        maxAge: process.env.COOKIE_REFRESH_MAX_AGE,
+      });
+
+      delete data.DT.refreshToken;
+
+      // console.log("check data after delete: ", data)
+    }
+
     return res.status(200).json({
       EM: data.EM,
       EC: data.EC,
@@ -70,4 +88,63 @@ const loginUser = async (req, res) => {
     });
   }
 };
-export { registerNewUser, loginUser };
+
+const requestRefreshToken = async (req, res) => {
+  try {
+    const cookieToken = req.cookies.refreshToken;
+
+    if (!cookieToken) {
+      return res.status(401).json({
+        EM: "No refresh token found. Please login again.",
+        EC: 401,
+        DT: "",
+      });
+    }
+
+    let data = await handleRefreshToken(cookieToken);
+
+    if (data && data.EC === 0) {
+      res.cookie("refreshToken", data.DT.refreshToken, {
+        httpOnly: true,
+        secure: false, 
+        sameSite: "strict",
+        maxAge: 7 * 24 * 60 * 60 * 1000, 
+      });
+
+      delete data.DT.refreshToken;
+    }
+
+    return res.status(data.EC === 0 ? 200 : 401).json({
+      EM: data.EM,
+      EC: data.EC,
+      DT: data.DT,
+    });
+  } catch (error) {
+    console.log("Error in requestRefreshToken server: ", error);
+    return res.status(500).json({
+      EM: "Something wrongs in server...",
+      EC: 500,
+      DT: "",
+    });
+  }
+};
+
+const logoutUser = async (req, res) => {
+  try {
+    res.clearCookie("refreshToken");
+    
+    return res.status(200).json({
+      EM: "Logout successfully.",
+      EC: 0,
+      DT: "",
+    });
+  } catch (error) {
+    console.log("Error in logoutUser server: ", error);
+    return res.status(500).json({
+      EM: "Something wrongs in server...",
+      EC: 500,
+      DT: "",
+    });
+  }
+};
+export { registerNewUser, loginUser, requestRefreshToken, logoutUser };

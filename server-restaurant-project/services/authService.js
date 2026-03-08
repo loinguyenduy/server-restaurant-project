@@ -1,6 +1,11 @@
 import bcrypt from "bcryptjs";
 import { User } from "../models/index.js";
 import { Op } from "sequelize";
+import {
+  createAccessToken,
+  createRefreshToken,
+  verifyToken,
+} from "./jwtService.js";
 
 //Hash password
 const hashUserPassword = async (userPassword) => {
@@ -167,14 +172,30 @@ const handleLoginUser = async (inputUserData) => {
         user.password,
       );
 
+      // console.log("check user before userData: ", user)
+
       if (isCorrectPassword) {
         let userData = user.get({ plain: true });
+        // console.log("check userData: ", userData)
         delete userData.password;
+
+        const payload = {
+          id: userData.id,
+          email: userData.email,
+          username: userData.username,
+          role: userData.role,
+        };
+
+        const accessToken = createAccessToken(payload);
+        const refreshToken = createRefreshToken(payload);
+
+        userData.accessToken = accessToken;
+        userData.refreshToken = refreshToken;
 
         return {
           EM: "Login successfully.",
           EC: 0,
-          DT: userData, 
+          DT: userData,
         };
       }
     }
@@ -194,4 +215,62 @@ const handleLoginUser = async (inputUserData) => {
   }
 };
 
-export { handleRegisterUser, handleLoginUser };
+const handleRefreshToken = async (cookieToken) => {
+  try {
+    const verification = verifyToken(cookieToken, true);
+
+    if (!verification.isValid) {
+      return {
+        EM: "Invalid or expired refresh token. Please login again.",
+        EC: 401,
+        DT: "",
+      };
+    }
+
+    // console.log(">>> Check decoded payload:", verification.decoded);
+
+    const userEmail = verification.decoded.email;
+
+    let user = await User.findOne({
+      where: { email: userEmail },
+      attributes: { exclude: ["password"] },
+    });
+
+    if (!user) {
+      return {
+        EM: "User no longer exists.",
+        EC: 401,
+        DT: "",
+      };
+    }
+
+    const userData = user.get({ plain: true });
+    const payload = {
+      id: userData.id,
+      email: userData.email,
+      username: userData.username,
+      role: userData.role,
+    };
+
+    const newAccessToken = createAccessToken(payload);
+    const newRefreshToken = createRefreshToken(payload);
+
+    userData.accessToken = newAccessToken;
+    userData.refreshToken = newRefreshToken;
+
+    return {
+      EM: "Refresh token successfully.",
+      EC: 0,
+      DT: userData,
+    };
+  } catch (error) {
+    console.log("Error in handleRefreshToken: ", error);
+    return {
+      EM: "Something wrongs in service...",
+      EC: 500,
+      DT: "",
+    };
+  }
+};
+
+export { handleRegisterUser, handleLoginUser, handleRefreshToken };
