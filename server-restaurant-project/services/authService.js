@@ -192,6 +192,8 @@ const handleLoginUser = async (inputUserData) => {
         userData.accessToken = accessToken;
         userData.refreshToken = refreshToken;
 
+        // console.log("check userData: ", userData)
+
         return {
           EM: "Login successfully.",
           EC: 0,
@@ -217,6 +219,7 @@ const handleLoginUser = async (inputUserData) => {
 
 const handleRefreshToken = async (cookieToken) => {
   try {
+    // console.log("Cookie token: ", cookieToken);
     const verification = verifyToken(cookieToken, true);
 
     if (!verification.isValid) {

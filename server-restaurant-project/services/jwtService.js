@@ -34,6 +34,7 @@ const verifyToken = (token, isRefreshToken = false) => {
         : process.env.JWT_ACCESS_SECRET;
 
     const decoded = jwt.verify(token, secretKey);
+    // console.log("Decoded: ", decoded)
     
     return {
         isValid: true,
