@@ -1,4 +1,4 @@
-import { addToCartService, getCartService } from "../services/cartService.js"
+import { addToCartService, getCartService, removeCartItemService, updateCartItemService } from "../services/cartService.js"
 
 const getCart = async (req, res) => {
   try {
@@ -40,11 +40,60 @@ const addToCart = async (req, res) => {
       DT: data.DT
     })
   } catch (error) {
-    
+    console.log("Error in addToCart server: ", error);
+    return res.status(500).json({
+      EM: "Something wrongs in server...",
+      EC: 500,
+      DT: [],
+    });
+  }
+}
+
+const updateCartItem = async (req, res) => {
+  try {
+    const userId = req.user.id //req.user = verification.decoded ... in middleware
+    const {product_id, quantity} = req.body
+
+    let data = await updateCartItemService(userId, product_id, quantity)
+    return res.status(200).json({
+      EM: data.EM,
+      EC: data.EC,
+      DT: data.DT
+    })
+  } catch (error) {
+    console.log("Error in updateCartItem server: ", error);
+    return res.status(500).json({
+      EM: "Something wrongs in server...",
+      EC: 500,
+      DT: [],
+    });
+  }
+}
+
+const removeCartItem = async (req, res) => {
+  try {
+    const userId = req.user.id
+    const productId = req.params.product_id
+
+    let data = await removeCartItemService(userId, productId)
+    return res.status(200).json({
+      EM: data.EM,
+      EC: data.EC,
+      DT: data.DT
+    }) 
+  } catch (error) {
+    console.log("Error in removeCartItem server: ", error);
+    return res.status(500).json({
+      EM: "Something wrongs in server...",
+      EC: 500,
+      DT: [],
+    });
   }
 }
 
 export {
   getCart,
-  addToCart
+  addToCart,
+  updateCartItem,
+  removeCartItem
 }
