@@ -26,20 +26,20 @@ const getCartService = async (userId) => {
     });
 
     if (!cart) {
-      return { 
-        EM: "Get cart success", 
-        EC: 0, 
-        DT: { items: [], totalPrice: 0 } 
+      return {
+        EM: "Get cart success",
+        EC: 0,
+        DT: { items: [], totalPrice: 0 },
       };
     }
 
-    //Initialize variable to count total price of cart
     let totalPrice = 0;
     const items = cart.CartItems || [];
 
     //Loop products to count and only count available product
-    items.forEach(item => {
+    items.forEach((item) => {
       if (item.Product && item.Product.is_available) {
+        // console.log(">>> check item.Product: ", item.Product)
         const itemPrice = parseFloat(item.Product.price);
         totalPrice += itemPrice * item.quantity;
       }
@@ -49,7 +49,7 @@ const getCartService = async (userId) => {
       cart_id: cart.id,
       user_id: cart.user_id,
       items: items,
-      totalPrice: totalPrice 
+      totalPrice: totalPrice,
     };
 
     return {
@@ -248,9 +248,68 @@ const removeCartItemService = async (userId, productId) => {
   }
 };
 
+//function is used to sync cart data from local storage to database when user login
+const syncCartService = async (userId, localCartItems) => {
+  try {
+    const [cart] = await Cart.findOrCreate({
+      where: { user_id: userId },
+      defaults: { user_id: userId },
+    });
+
+    if (
+      localCartItems &&
+      Array.isArray(localCartItems) &&
+      localCartItems.length > 0
+    ) {
+      //use for...of instead of forEach to handle async/await
+      for (const item of localCartItems) {
+        // check product availability and stock quantity before syncing
+        const product = await Product.findByPk(item.product_id);
+        if (!product || !product.is_available) continue;
+
+        const existingItem = await CartItem.findOne({
+          where: { cart_id: cart.id, product_id: item.product_id },
+        });
+        // if product is exist in cart, count total quantity and update
+        if (existingItem) {
+          let newQty = existingItem.quantity + item.quantity;
+          if (newQty > product.stock_quantity) {
+            newQty = product.stock_quantity;
+          }
+
+          await existingItem.update({ quantity: newQty });
+        } else {
+          // if product is not exist in cart, create new cart item with quantity from local storage
+          let newQty = item.quantity;
+
+          if (newQty > product.stock_quantity) {
+            newQty = product.stock_quantity;
+          }
+
+          await CartItem.create({
+            cart_id: cart.id,
+            product_id: item.product_id,
+            quantity: newQty,
+          });
+        }
+      }
+    }
+
+    return await getCartService(userId); // return updated cart data after syncing for client
+  } catch (error) {
+    console.log("Error in syncCartService:", error);
+    return {
+      EM: "Something wrongs in service...",
+      EC: 500,
+      DT: "",
+    };
+  }
+};
+
 export {
   getCartService,
   addToCartService,
   updateCartItemService,
   removeCartItemService,
+  syncCartService,
 };

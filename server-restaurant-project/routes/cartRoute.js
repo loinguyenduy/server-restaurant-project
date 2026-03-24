@@ -1,4 +1,4 @@
-import { addToCart, getCart, removeCartItem, updateCartItem } from "../controllers/cartController.js";
+import { addToCart, getCart, removeCartItem, syncCart, updateCartItem } from "../controllers/cartController.js";
 import { checkUserJWT } from "../middleware/jwtAction.js";
 import express from "express";
 
@@ -12,5 +12,7 @@ router.post("/add-to-cart", checkUserJWT, addToCart)
 router.put("/update-cart-item", checkUserJWT, updateCartItem)
 //Remove product in cart
 router.delete("/remove/:product_id", checkUserJWT, removeCartItem)
+//Sync cart data from local storage to database when user login
+router.post("/sync-cart", checkUserJWT, syncCart)
 
 export default router;
