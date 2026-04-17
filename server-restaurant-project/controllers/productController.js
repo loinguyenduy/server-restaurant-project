@@ -2,9 +2,16 @@ import { createProduct, getProducts } from "../services/productService.js";
 
 const getAllProducts = async (req, res) => {
   try {
-    const filterCategory = {category_id: req.query.category_id}
-    let data = await getProducts(filterCategory);
-    
+    const options = {
+      category_id: req.query.category_id,
+      search: req.query.search,
+      sort: req.query.sort,
+      page: req.query.page || 1,    
+      limit: req.query.limit || 9   
+    };
+
+    let data = await getProducts(options);
+
     return res.status(200).json({
       EM: data.EM,
       EC: data.EC,
@@ -13,7 +20,7 @@ const getAllProducts = async (req, res) => {
   } catch (error) {
     console.log("Error in getAllProducts server: ", error);
     return res.status(500).json({
-      EM: "Error in getAllProducts server.",
+      EM: "Something wrongs in server...",
       EC: 500,
       DT: [],
     });
@@ -99,7 +106,7 @@ const createNewProduct = async (req, res) => {
   } catch (error) {
     console.log("Error in createNewProduct server: ", error);
     return res.status(500).json({
-      EM: "Error in createNewProduct server.",
+      EM: "Something wrongs in server...",
       EC: 500,
       DT: [],
     });

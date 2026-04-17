@@ -1,34 +1,67 @@
-import { Product, Category } from "../models/index.js";
+import { Product, Category, sequelize } from "../models/index.js";
+import { Op } from "sequelize";
 
-const getProducts = async (categoryFilterId) => {
+const getProducts = async (options) => {
   try {
     //const category_id = categoryFilterId.category_id
-    const {category_id} = categoryFilterId //destructuring
-    let whereCondition = {}
+    const { category_id, search, sort, page, limit} = options; //destructuring: get parameters from 'options'
 
-    if(category_id && category_id !== 'all'){
-      whereCondition.category_id = category_id
+    //initialize condition to query
+    let whereCondition = {}; 
+    let orderCondition = [["createdAt", "DESC"]];
+
+    let offset = (page - 1) * limit; //offset: amount of page is skipped, ex: page 2 = 9 -> 18 | (2- 1) * 9 = 9 (skip 9 previous page) 
+
+    //filter category
+    if (category_id && category_id !== "all") {
+      whereCondition.category_id = category_id;
     }
     // console.log(">>> Check whereCondition:", whereCondition);
 
-    let data = await Product.findAll({
-      order: [['createdAt', 'DESC']],
-      attributes: { exclude: ["createdAt", "updatedAt"] },
+    //search by keyword
+    if (search) {
+      const keyword = search.trim().toLowerCase();
+      whereCondition.name = sequelize.where(
+        sequelize.fn('LOWER', sequelize.col('Product.name')), 
+        'LIKE',
+        `%${keyword}%`
+      )
+    }
+
+    //sort by price
+    if (sort === "price_asc") {
+      orderCondition = [["price", "ASC"]];
+    } else if (sort === "price_desc") {
+      orderCondition = [["price", "DESC"]];
+    }
+
+    const { count, rows } = await Product.findAndCountAll({
+      where: whereCondition,
+      order: orderCondition, 
+      limit: +limit,   
+      offset: +offset, 
       include: [{ model: Category, attributes: ["name"] }],
-      where: whereCondition
+      attributes: { exclude: ["updatedAt"] }
     });
 
+    // count total of pages: math.ceil (làm tròn)
+    let totalPages = Math.ceil(count / limit);
+
     return {
-      EM: "Get all products successfully.",
+      EM: "Get products with pagination successfully.",
       EC: 0,
-      DT: data,
+      DT: {
+        totalRows: count,
+        totalPages: totalPages,
+        products: rows
+      },
     };
   } catch (error) {
     console.log("Error in getProducts service: ", error);
     return {
-      EM: "Error in getProducts service.",
+      EM: "Something wrongs in service...",
       EC: 500,
-      DT: [],
+      DT: []
     };
   }
 };
@@ -90,7 +123,7 @@ const createProduct = async (productData) => {
   } catch (error) {
     console.log("Error in createProduct service: ", error);
     return {
-      EM: "Error in createProduct service.",
+      EM: "Something wrongs in service...",
       EC: 500,
       DT: [],
     };

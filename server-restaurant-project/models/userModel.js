@@ -28,13 +28,36 @@ const User = sequelize.define(
       type: DataTypes.STRING,
       allowNull: false,
     },
+    gender: {
+      type: DataTypes.ENUM("male", "female", "other"),
+      allowNull: true,
+      defaultValue: "other",
+      validate: {
+        isIn: {
+          args: [["male", "female", "other"]],
+          msg: "Gender must be male, female, or other.",
+        },
+      }
+    },
     phone_number: {
       type: DataTypes.STRING,
       allowNull: true,
+      validate: {
+        is: {
+          args: /^[0-9]+$/,
+          msg: "Phone number must only contain numbers."
+        }
+      }
     },
     role: {
       type: DataTypes.ENUM("admin", "staff", "customer"),
       defaultValue: "customer",
+      validate: {
+        isIn: {
+          args: [["admin", "staff", "customer"]],
+          msg: "Role must be admin, staff, or customer.",
+        },
+      },
     },
     avatar_url: {
       type: DataTypes.STRING,
