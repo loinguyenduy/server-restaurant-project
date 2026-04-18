@@ -46,12 +46,16 @@ const Order = sequelize.define(
       allowNull: false,
     },
     payment_status: {
-      type: DataTypes.STRING,
+      type: DataTypes.ENUM("pending", "paid", "failed"),
       defaultValue: "pending",
     },
     payment_method: {
-      type: DataTypes.ENUM("cash", "card"),
+      type: DataTypes.ENUM("cash", "card", "payos"),
       defaultValue: "cash",
+    },
+    transaction_id: {
+      type: DataTypes.STRING,
+      allowNull: true, 
     },
     address: {
       type: DataTypes.STRING,

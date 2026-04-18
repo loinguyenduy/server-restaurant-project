@@ -34,6 +34,7 @@ apiRoutes(app);
 const connectToDB = async () => {
   try {
     await connectDB;
+    // await sequelize.sync({ alter: true });
     await sequelize.sync();
     console.log("All tables have been synchronized.");
 
