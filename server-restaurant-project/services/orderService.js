@@ -109,9 +109,7 @@ const createOrderAndPaymentService = async (userId, checkoutData) => {
             DT: paymentLinkResponse.checkoutUrl
         };
         }
-
         
-
     } catch (error) {
         await transaction.rollback();
         console.error(">>> Error in createOrderService:", error);
