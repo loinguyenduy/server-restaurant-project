@@ -2,7 +2,6 @@ import payOSInstance from "../config/payosConfig.js";
 import { createPaymentLinkService } from "../services/payosService.js";
 import { Order, Cart, CartItem } from "../models/index.js";
 
-// Hàm xử lý tạo link thanh toán (đã làm ở bước trước)
 const handleCreatePayment = async (req, res) => {
     try {
         const { amount, orderId } = req.body;
@@ -14,7 +13,11 @@ const handleCreatePayment = async (req, res) => {
             });
         }
         const result = await createPaymentLinkService(amount, orderId);
-        return res.status(200).json(result);
+        return res.status(200).json({
+            EC: result.EC,
+            EM: result.EM,
+            DT: result.DT
+        });
     } catch (error) {
         console.error(">>> Error from Payment Controller:", error);
         return res.status(500).json({
@@ -27,8 +30,9 @@ const handleCreatePayment = async (req, res) => {
 
 const handlePayOSWebhook = async (req, res) => {
     try {
-        const webhookData = req.body;
+        const webhookData = req.body; //req.body contain the data sent by PayOS in the webhook
 
+        // Verify the webhook signature and check the payment status 
         const verifiedData = await payOSInstance.webhooks.verify(webhookData);
 
         const { orderCode, amount, code } = verifiedData;

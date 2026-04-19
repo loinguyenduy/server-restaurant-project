@@ -15,7 +15,11 @@ const handleCheckout = async (req, res) => {
 
         const result = await createOrderAndPaymentService(userId, checkoutData);
 
-        return res.status(200).json(result);
+        return res.status(200).json({
+            EC: result.EC,
+            EM: result.EM,
+            DT: result.DT
+        });
     } catch (error) {
         console.error(">>> Error in handleCheckout controller:", error);
         return res.status(500).json({

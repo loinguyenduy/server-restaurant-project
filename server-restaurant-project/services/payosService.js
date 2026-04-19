@@ -2,8 +2,10 @@ import payOSInstance from "../config/payosConfig.js";
 
 const createPaymentLinkService = async (amount, orderId) => {
     try {
+        // Generate a unique order code for PayOS
         const orderCode = Number(String(Date.now()).slice(-6));
 
+        // Prepare the request body for PayOS
         const body = {
             orderCode: orderCode,
             amount: Number(amount),
@@ -12,6 +14,7 @@ const createPaymentLinkService = async (amount, orderId) => {
             cancelUrl: process.env.PAYOS_CANCEL_URL,
         };
 
+        // Call PayOS API to create a payment link
         const paymentLinkResponse = await payOSInstance.paymentRequests.create(body);
         
         return {
