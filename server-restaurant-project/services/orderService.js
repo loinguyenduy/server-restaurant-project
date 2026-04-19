@@ -119,4 +119,104 @@ const createOrderAndPaymentService = async (userId, checkoutData) => {
     }
 };
 
-export { createOrderAndPaymentService };
+const getUserOrdersService = async (userId) => {
+    try {
+        const orders = await Order.findAll({
+            where: { user_id: userId },
+            order: [['createdAt', 'DESC']], 
+            include: [
+                {
+                    model: OrderItem,
+                    include: [
+                        {
+                            model: Product,
+                            attributes: ['id', 'name', 'image_url'] 
+                        }
+                    ]
+                }
+            ]
+        });
+
+        if (!orders || orders.length === 0) {
+            return {
+                EC: 404,
+                EM: "No orders found",
+                DT: []
+            };
+        }
+
+        return {
+            EC: 0,
+            EM: "Get user orders successfully",
+            DT: orders
+        };
+
+    } catch (error) {
+        console.error(">>> Error in getUserOrdersService:", error);
+        return {
+            EC: 500,
+            EM: "Internal server error while fetching orders",
+            DT: ""
+        };
+    }
+};
+
+// This function allows users to re-create a payment link for an order that is still pending payment.
+const reCreatePaymentLinkService = async (userId, orderId) => {
+    try {
+        const order = await Order.findOne({
+            where: { 
+                id: orderId,
+                user_id: userId 
+            }
+        });
+
+        if (!order) {
+            return { EC: 404, EM: "Order not found", DT: "" };
+        }
+
+        if (order.payment_status !== "pending") {
+            return { 
+                EC: 400, 
+                EM: `Cannot re-pay. Order payment status is currently: ${order.payment_status}`, 
+                DT: "" 
+            };
+        }
+
+        if (order.payment_method === "cash") {
+            return { EC: 400, EM: "This order is paid by cash. No payment link needed.", DT: "" };
+        }
+
+        // create new unique order code for PayOS to avoid conflicts with previous payment link
+        const newPayosOrderCode = Number(String(Date.now()).slice(-6) + Math.floor(Math.random() * 100));
+
+        // update order's transaction_id with the new PayOS order code
+        await order.update({ transaction_id: String(newPayosOrderCode) });
+
+        const bodyPayOS = {
+            orderCode: newPayosOrderCode,
+            amount: Number(order.final_amount),
+            description: `Re-pay ${String(newPayosOrderCode)}`,
+            returnUrl: process.env.PAYOS_RETURN_URL,
+            cancelUrl: process.env.PAYOS_CANCEL_URL,
+        };
+
+        const paymentLinkResponse = await payOSInstance.paymentRequests.create(bodyPayOS);
+
+        return {
+            EC: 0,
+            EM: "Create new payment link successfully",
+            DT: paymentLinkResponse.checkoutUrl
+        };
+
+    } catch (error) {
+        console.error(">>> Error in reCreatePaymentLinkService:", error);
+        return {
+            EC: 500,
+            EM: "Internal server error while re-creating payment link",
+            DT: ""
+        };
+    }
+};
+
+export { createOrderAndPaymentService, getUserOrdersService, reCreatePaymentLinkService };
