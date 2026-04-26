@@ -29,6 +29,18 @@ const Reservation = sequelize.define(
       type: DataTypes.ENUM("pending", "confirmed", "cancelled", "completed"),
       defaultValue: "pending",
     },
+  contact_name: {
+    type: DataTypes.STRING,
+    allowLength: false, 
+  },
+  contact_phone: {
+    type: DataTypes.STRING,
+    allowLength: false,
+  },
+  note: {
+    type: DataTypes.TEXT,
+    allowLength: true,
+  }
   },
   {
     tableName: "reservations",

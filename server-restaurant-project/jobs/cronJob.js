@@ -6,20 +6,19 @@ import { sequelize } from "../config/databaseConfig.js";
 const initCronJobs = () => {
   // Schedule a cron job to run every 15 minutes
   cron.schedule("*/15 * * * *", async () => {
-  // cron.schedule("* * * * *", async () => { test 1 minute
+    // cron.schedule("* * * * *", async () => {
     console.log(">>> Checking for expired pending orders...");
     const transaction = await sequelize.transaction();
 
     try {
       // Calculate the expiration time (30 minutes ago)
-      // const expirationTime = new Date(Date.now() - 1 * 60 * 1000); test 1 minute
-            const expirationTime = new Date(Date.now() - 30 * 60 * 1000);
-
+      // const expirationTime = new Date(Date.now() - 1 * 60 * 1000);
+      const expirationTime = new Date(Date.now() - 30 * 60 * 1000);
 
       // Find all orders that are still pending and created before the expiration time
       const expiredOrders = await Order.findAll({
         where: {
-          payment_status: "pending",
+          // payment_status: "pending",
           order_status: "pending",
           createdAt: { [Op.lt]: expirationTime },
         },
@@ -58,6 +57,35 @@ const initCronJobs = () => {
     } catch (error) {
       await transaction.rollback();
       console.error(">>> Error in Cron Job:", error);
+    }
+  });
+
+  cron.schedule("*/5 * * * *", async () => {
+    console.log(">>> Checking for expired pending reservations...");
+    try {
+      // Mốc thời gian: Hiện tại trừ đi 15 phút
+      const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000);
+
+      // Tìm và cập nhật: Những đơn pending có giờ hẹn nhỏ hơn (trước) mốc 15 phút trước
+      const [affectedCount] = await Reservation.update(
+        { status: "cancelled" },
+        {
+          where: {
+            status: "pending",
+            reservation_time: {
+              [Op.lt]: fifteenMinutesAgo,
+            },
+          },
+        },
+      );
+
+      if (affectedCount > 0) {
+        console.log(
+          `>>> Successfully auto-cancelled ${affectedCount} expired reservations.`,
+        );
+      }
+    } catch (error) {
+      console.error(">>> Error in Reservation Cron Job:", error);
     }
   });
 };
