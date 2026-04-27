@@ -1,46 +1,50 @@
-import { DataTypes } from 'sequelize';
-import { sequelize } from '../config/database.js';
+import { DataTypes } from "sequelize";
+import { sequelize } from "../config/databaseConfig.js";
 
-const Product = sequelize.define('Product', {
+const Product = sequelize.define(
+  "Product",
+  {
     id: {
-        type: DataTypes.UUID,
-        defaultValue: DataTypes.UUIDV4,
-        primaryKey: true
+      type: DataTypes.UUID,
+      defaultValue: DataTypes.UUIDV4,
+      primaryKey: true,
     },
     category_id: {
-        type: DataTypes.UUID,
-        allowNull: false
+      type: DataTypes.UUID,
+      allowNull: false,
     },
     name: {
-        type: DataTypes.STRING,
-        allowNull: false
+      type: DataTypes.STRING,
+      allowNull: false,
     },
     description: {
-        type: DataTypes.TEXT,
-        allowNull: true
+      type: DataTypes.TEXT,
+      allowNull: true,
     },
     price: {
-        type: DataTypes.DECIMAL(10, 2),
-        allowNull: false
+      type: DataTypes.DECIMAL(10, 2),
+      allowNull: false,
     },
     original_price: {
-        type: DataTypes.DECIMAL(10, 2),
-        allowNull: true
+      type: DataTypes.DECIMAL(10, 2),
+      allowNull: true,
     },
     image_url: {
-        type: DataTypes.STRING,
-        allowNull: true 
+      type: DataTypes.STRING,
+      allowNull: true,
     },
     stock_quantity: {
-        type: DataTypes.INTEGER,
-        defaultValue: 0 
+      type: DataTypes.INTEGER,
+      defaultValue: 0,
     },
     is_available: {
-        type: DataTypes.BOOLEAN,
-        defaultValue: true 
-    }
-}, {
-    tableName: 'products'
-});
+      type: DataTypes.BOOLEAN,
+      defaultValue: true,
+    },
+  },
+  {
+    tableName: "products",
+  },
+);
 
 export default Product;

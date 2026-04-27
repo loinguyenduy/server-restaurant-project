@@ -1,8 +1,8 @@
-import { Category } from "../models/index.js";
+ import { Category } from "../models/index.js";
 
 const getCategories = async () => {
   try {
-    let data = await Category.findAll({order: [["name", "ASC"]]});
+    let data = await Category.findAll({ order: [["name", "ASC"]] });
     return {
       EM: "Get all categories successfully.",
       EC: 0,
@@ -11,7 +11,7 @@ const getCategories = async () => {
   } catch (error) {
     console.log("Error in getCategories service: ", error);
     return {
-      EM: "Error in getCategories service.",
+      EM: "Something wrongs in service...",
       EC: 500,
       DT: [],
     };
@@ -41,7 +41,7 @@ const createCategory = async (categoryName) => {
   } catch (error) {
     console.log("Error in createCategory service: ", error);
     return {
-      EM: "Error in createCategory service.",
+      EM: "Something wrongs in service...",
       EC: 500,
       DT: [],
     };

@@ -1,31 +1,35 @@
-import { DataTypes } from 'sequelize';
-import { sequelize } from '../config/database.js';
+import { DataTypes } from "sequelize";
+import { sequelize } from "../config/databaseConfig.js";
 
-const Table = sequelize.define('Table', {
+const Table = sequelize.define(
+  "Table",
+  {
     id: {
-        type: DataTypes.UUID,
-        defaultValue: DataTypes.UUIDV4,
-        primaryKey: true
+      type: DataTypes.UUID,
+      defaultValue: DataTypes.UUIDV4,
+      primaryKey: true,
     },
     table_number: {
-        type: DataTypes.STRING,
-        allowNull: false,
-        unique: true
+      type: DataTypes.STRING,
+      allowNull: false,
+      unique: true,
     },
     capacity: {
-        type: DataTypes.INTEGER,
-        allowNull: false
+      type: DataTypes.INTEGER,
+      allowNull: false,
     },
     status: {
-        type: DataTypes.ENUM('available', 'occupied', 'reserved'),
-        defaultValue: 'available'
+      type: DataTypes.ENUM("available", "occupied", "reserved"),
+      defaultValue: "available",
     },
     qr_code_url: {
-        type: DataTypes.STRING,
-        allowNull: true
-    }
-}, {
-    tableName: 'tables'
-});
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
+  },
+  {
+    tableName: "tables",
+  },
+);
 
 export default Table;

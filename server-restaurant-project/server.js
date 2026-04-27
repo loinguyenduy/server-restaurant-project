@@ -2,9 +2,10 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import cookieParser from "cookie-parser";
-import { connectDB, sequelize } from "./config/database.js";
+import { connectDB, sequelize } from "./config/databaseConfig.js";
 import "./models/index.js";
 import apiRoutes from "./routes/apiRoutes.js";
+import { initCronJobs } from "./jobs/cronJob.js";
 
 dotenv.config();
 
@@ -23,6 +24,7 @@ app.use(
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use(cookieParser());
 
 // cookie
 
@@ -33,8 +35,13 @@ apiRoutes(app);
 const connectToDB = async () => {
   try {
     await connectDB;
+    // await sequelize.sync({ alter: true });
     await sequelize.sync();
     console.log("All tables have been synchronized.");
+
+    // Initialize cron jobs
+    initCronJobs();
+    console.log("Cron Jobs initialized successfully.");
 
     app.listen(PORT, () => {
       console.log("Server is running in port: ", PORT);
