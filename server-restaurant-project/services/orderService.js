@@ -233,8 +233,113 @@ const reCreatePaymentLinkService = async (userId, orderId) => {
   }
 };
 
+
+const getAllOrdersService = async (options) => {
+    try {
+        const { page, limit, status, search } = options;
+        let whereCondition = {};
+        let offset = (page - 1) * limit;
+
+        // Lọc theo trạng thái (pending, processing, completed, cancelled)
+        if (status && status !== 'all') {
+            whereCondition.order_status = status;
+        }
+
+        // Tìm kiếm theo số điện thoại người nhận hoặc Mã đơn hàng (transaction_id)
+        if (search) {
+            const keyword = search.trim();
+            whereCondition = {
+                ...whereCondition,
+                [Op.or]: [
+                    { phone_receiver: { [Op.like]: `%${keyword}%` } },
+                    { transaction_id: { [Op.like]: `%${keyword}%` } }
+                ]
+            };
+        }
+
+        const { count, rows } = await Order.findAndCountAll({
+            where: whereCondition,
+            order: [["createdAt", "DESC"]],
+            limit: +limit,
+            offset: +offset,
+            include: [
+                {
+                    model: OrderItem,
+                    include: [{ model: Product, attributes: ["id", "name", "image_url"] }]
+                }
+            ]
+        });
+
+        let totalPages = Math.ceil(count / limit);
+
+        return {
+            EC: 0,
+            EM: "Get all orders successfully",
+            DT: {
+                totalRows: count,
+                totalPages: totalPages,
+                orders: rows
+            }
+        };
+    } catch (error) {
+        console.error(">>> Error in getAllOrdersService:", error);
+        return { EC: 500, EM: "Internal server error", DT: "" };
+    }
+};
+
+const updateOrderStatusService = async (orderId, newStatus) => {
+    try {
+        // Chỉ cho phép các trạng thái hợp lệ
+        const validStatuses = ['pending', 'processing', 'completed', 'cancelled'];
+        if (!validStatuses.includes(newStatus)) {
+            return { EC: 400, EM: "Invalid order status", DT: "" };
+        }
+
+        const order = await Order.findOne({ where: { id: orderId } });
+        if (!order) {
+            return { EC: 404, EM: "Order not found", DT: "" };
+        }
+
+        if (order.order_status === 'completed' || order.order_status === 'cancelled') {
+            return { 
+                EC: 403, 
+                EM: `This order is already ${order.order_status} and cannot be modified.`, 
+                DT: "" 
+            };
+        }
+
+        let updateData = { order_status: newStatus };
+
+        // Nếu đơn hàng được đánh dấu là Completed
+        if (newStatus === 'completed') {
+            // Và nếu là thanh toán tiền mặt (Cash), ta tự động coi như đã thu tiền
+            if (order.payment_method === 'cash') {
+                updateData.payment_status = 'paid';
+            }
+        }
+
+        // Nếu đơn hàng bị Hủy (Cancelled), ta nên cập nhật trạng thái thanh toán (nếu cần)
+        if (newStatus === 'cancelled' && order.payment_status === 'pending') {
+            updateData.payment_status = 'failed'; 
+        }
+
+        await order.update(updateData);
+
+        return {
+            EC: 0,
+            EM: `Order status updated to ${newStatus} successfully`,
+            DT: ""
+        };
+    } catch (error) {
+        console.error(">>> Error in updateOrderStatusService:", error);
+        return { EC: 500, EM: "Internal server error", DT: "" };
+    }
+};
+
 export {
   createOrderAndPaymentService,
   getUserOrdersService,
   reCreatePaymentLinkService,
+  getAllOrdersService,
+  updateOrderStatusService
 };

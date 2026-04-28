@@ -1,21 +1,20 @@
 import express from "express";
 import { 
-    handleCheckAvailability, 
-    handleCreateReservation,
-    handleGetUserReservations,
-    handleCancelReservation
+    handleCheckAvailability, handleCreateReservation, handleGetUserReservations, handleCancelReservation,
+    handleGetAllReservations, handleUpdateReservationStatus
 } from "../controllers/reservationController.js";
-import { checkUserJWT } from "../middleware/jwtAction.js";
+import { checkUserJWT, checkUserPermission } from "../middleware/jwtAction.js";
 
 const router = express.Router();
-//route to check available slots 
+
+// Route của Customer
 router.get("/reservations/available-slots", handleCheckAvailability);
-//protected route to create reservation
 router.post("/reservations/book", checkUserJWT, handleCreateReservation);
-//protected route to get user's reservations
 router.get("/reservations/my-reservations", checkUserJWT, handleGetUserReservations);
-//protected route to cancel reservation
 router.put("/reservations/cancel/:id", checkUserJWT, handleCancelReservation);
 
+// Route của Admin & Staff
+router.get("/manage/reservations", checkUserJWT, checkUserPermission(["admin", "staff"]), handleGetAllReservations);
+router.put("/manage/reservations/:id/status", checkUserJWT, checkUserPermission(["admin", "staff"]), handleUpdateReservationStatus);
 
 export default router;

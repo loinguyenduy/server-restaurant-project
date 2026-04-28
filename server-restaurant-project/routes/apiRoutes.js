@@ -7,6 +7,7 @@ import payosRoute from "./payosRoute.js"
 import orderRoute from "./orderRoute.js"
 import reservationRoute from "./reservationRoute.js"
 import userRoute from "./userRoute.js"
+import dashboardRoute from "./dashboardRoute.js";
 
 const router = express.Router();
 const apiRoutes = (app) => {
@@ -26,7 +27,8 @@ const apiRoutes = (app) => {
   router.use("/", reservationRoute)
   //user routes
   router.use("/users", userRoute)
-
+  //dashboard routes
+  router.use("/", dashboardRoute)
 
   return app.use("/api/v1/", router);
 };

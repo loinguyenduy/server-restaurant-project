@@ -1,4 +1,10 @@
-import { createOrderAndPaymentService, getUserOrdersService, reCreatePaymentLinkService } from "../services/orderService.js";
+import { 
+    createOrderAndPaymentService, 
+    getUserOrdersService, 
+    reCreatePaymentLinkService,
+    getAllOrdersService,
+    updateOrderStatusService
+} from "../services/orderService.js";
 
 const handleCheckout = async (req, res) => {
     try {
@@ -83,4 +89,38 @@ const handleRePayOrder = async (req, res) => {
 
 
 
-export { handleCheckout, handleGetUserOrders, handleRePayOrder };
+const handleGetAllOrders = async (req, res) => {
+    try {
+        const options = {
+            page: req.query.page || 1,
+            limit: req.query.limit || 10,
+            status: req.query.status,
+            search: req.query.search
+        };
+
+        const result = await getAllOrdersService(options);
+        return res.status(200).json(result);
+    } catch (error) {
+        console.error(">>> Error in handleGetAllOrders controller:", error);
+        return res.status(500).json({ EC: -1, EM: "Server error", DT: "" });
+    }
+};
+
+const handleUpdateOrderStatus = async (req, res) => {
+    try {
+        const orderId = req.params.id;
+        const { status } = req.body;
+
+        if (!status) {
+            return res.status(400).json({ EC: 1, EM: "Missing status", DT: "" });
+        }
+
+        const result = await updateOrderStatusService(orderId, status);
+        return res.status(200).json(result);
+    } catch (error) {
+        console.error(">>> Error in handleUpdateOrderStatus controller:", error);
+        return res.status(500).json({ EC: -1, EM: "Server error", DT: "" });
+    }
+};
+
+export { handleCheckout, handleGetUserOrders, handleRePayOrder, handleGetAllOrders, handleUpdateOrderStatus };

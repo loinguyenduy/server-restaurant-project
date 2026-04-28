@@ -212,4 +212,84 @@ const cancelReservationService = async (userId, reservationId) => {
     }
 };
 
-export { checkAvailabilityService, createReservationService, getUserReservationsService, cancelReservationService };
+const getAllReservationsService = async (options) => {
+    try {
+        const { page, limit, status, date } = options;
+        let whereCondition = {};
+        let offset = (page - 1) * limit;
+
+        if (status && status !== 'all') {
+            whereCondition.status = status;
+        }
+
+        // Lọc theo ngày cụ thể (để Staff xem hôm nay có bao nhiêu khách đặt)
+        if (date) {
+            const startDate = new Date(`${date}T00:00:00.000Z`);
+            const endDate = new Date(`${date}T23:59:59.999Z`);
+            whereCondition.reservation_time = {
+                [Op.between]: [startDate, endDate]
+            };
+        }
+
+        const { count, rows } = await Reservation.findAndCountAll({
+            where: whereCondition,
+            order: [['reservation_time', 'ASC']], // Ưu tiên giờ gần nhất lên đầu
+            limit: +limit,
+            offset: +offset
+        });
+
+        let totalPages = Math.ceil(count / limit);
+
+        return {
+            EC: 0,
+            EM: "Get all reservations successfully",
+            DT: {
+                totalRows: count,
+                totalPages: totalPages,
+                reservations: rows
+            }
+        };
+    } catch (error) {
+        console.error(">>> Error in getAllReservationsService:", error);
+        return { EC: 500, EM: "Internal server error", DT: "" };
+    }
+};
+
+const updateReservationStatusService = async (reservationId, newStatus) => {
+    try {
+        const validStatuses = ['pending', 'confirmed', 'completed', 'cancelled'];
+        if (!validStatuses.includes(newStatus)) {
+            return { EC: 400, EM: "Invalid reservation status", DT: "" };
+        }
+
+        const reservation = await Reservation.findOne({ where: { id: reservationId } });
+        if (!reservation) {
+            return { EC: 404, EM: "Reservation not found", DT: "" };
+        }
+        // console.log(reservation.status);
+        // --- CHỐT CHẶN BẢO VỆ ---
+        if (reservation.status === 'completed' || reservation.status === 'cancelled') {
+            return { 
+                EC: 403, 
+                EM: `This reservation is already ${reservation.status} and cannot be modified.`, 
+                DT: "" 
+            };
+        }
+
+        await reservation.update({ status: newStatus });
+
+        return {
+            EC: 0,
+            EM: `Reservation status updated to ${newStatus} successfully`,
+            DT: ""
+        };
+    } catch (error) {
+        console.error(">>> Error in updateReservationStatusService:", error);
+        return { EC: 500, EM: "Internal server error", DT: "" };
+    }
+};
+
+export { 
+    checkAvailabilityService, createReservationService, getUserReservationsService, cancelReservationService,
+    getAllReservationsService, updateReservationStatusService 
+};
