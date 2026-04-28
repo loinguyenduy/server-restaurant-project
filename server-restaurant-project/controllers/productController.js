@@ -1,4 +1,4 @@
-import { createProduct, getProducts } from "../services/productService.js";
+import { createProduct, getProducts, updateProduct, deleteProduct } from "../services/productService.js";
 
 const getAllProducts = async (req, res) => {
   try {
@@ -113,4 +113,35 @@ const createNewProduct = async (req, res) => {
   }
 };
 
-export { getAllProducts, createNewProduct };
+const updateExistingProduct = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const image_url = req.file ? req.file.path : ""; // Bắt link ảnh mới từ Multer Cloudinary
+
+    const finalProductData = {
+      ...req.body,
+    };
+    
+    // Chỉ ghi đè image_url nếu có file ảnh mới gửi lên
+    if (image_url) {
+      finalProductData.image_url = image_url;
+    }
+
+    let data = await updateProduct(id, finalProductData);
+    return res.status(200).json(data);
+  } catch (error) {
+    return res.status(500).json({ EM: "Server error", EC: 500, DT: "" });
+  }
+};
+
+const deleteExistingProduct = async (req, res) => {
+  try {
+    const { id } = req.params;
+    let data = await deleteProduct(id);
+    return res.status(200).json(data);
+  } catch (error) {
+    return res.status(500).json({ EM: "Server error", EC: 500, DT: "" });
+  }
+};
+
+export { getAllProducts, createNewProduct, updateExistingProduct, deleteExistingProduct };

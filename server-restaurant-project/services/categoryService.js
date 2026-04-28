@@ -1,4 +1,5 @@
- import { Category } from "../models/index.js";
+import { Op } from "sequelize";
+import { Category } from "../models/index.js";
 
 const getCategories = async () => {
   try {
@@ -48,4 +49,47 @@ const createCategory = async (categoryName) => {
   }
 };
 
-export { getCategories, createCategory };
+const updateCategory = async (id, categoryName) => {
+  try {
+    let category = await Category.findOne({ where: { id: id } });
+    if (!category) {
+      return { EM: "Category not found.", EC: 404, DT: "" };
+    }
+
+    // Kiểm tra xem tên mới có bị trùng với danh mục KHÁC không
+    let checkName = await Category.findOne({
+      where: {
+        name: categoryName,
+        id: { [Op.ne]: id },
+      },
+    });
+
+    if (checkName) {
+      return { EM: "Category name already exists.", EC: 409, DT: "" };
+    }
+
+    await category.update({ name: categoryName });
+    return { EM: "Update category successfully.", EC: 0, DT: category };
+  } catch (error) {
+    console.log("Error in updateCategory service: ", error);
+    return { EM: "Something wrongs in service...", EC: 500, DT: "" };
+  }
+};
+
+const deleteCategory = async (id) => {
+  try {
+    let category = await Category.findOne({ where: { id: id } });
+    if (!category) {
+      return { EM: "Category not found.", EC: 404, DT: "" };
+    }
+
+    // Tùy chọn: Có thể check xem có Product nào đang dùng Category này không trước khi xóa
+    await category.destroy();
+    return { EM: "Delete category successfully.", EC: 0, DT: "" };
+  } catch (error) {
+    console.log("Error in deleteCategory service: ", error);
+    return { EM: "Something wrongs in service...", EC: 500, DT: "" };
+  }
+};
+
+export { getCategories, createCategory, updateCategory, deleteCategory };

@@ -130,4 +130,43 @@ const createProduct = async (productData) => {
   }
 };
 
-export { getProducts, createProduct };
+const updateProduct = async (id, productData) => {
+  try {
+    let product = await Product.findOne({ where: { id: id } });
+    if (!product) {
+      return { EM: "Product not found.", EC: 404, DT: "" };
+    }
+
+    // Nếu có đổi tên, check trùng tên với món khác
+    if (productData.name && productData.name !== product.name) {
+      let checkName = await Product.findOne({ where: { name: productData.name } });
+      if (checkName) return { EM: "Product name already exists.", EC: 409, DT: "" };
+    }
+
+    // Nếu không có ảnh mới upload, giữ nguyên ảnh cũ
+    if (!productData.image_url) {
+      productData.image_url = product.image_url;
+    }
+
+    await product.update(productData);
+    return { EM: "Update product successfully.", EC: 0, DT: product };
+  } catch (error) {
+    console.log("Error in updateProduct service: ", error);
+    return { EM: "Something wrongs in service...", EC: 500, DT: "" };
+  }
+};
+
+const deleteProduct = async (id) => {
+  try {
+    let product = await Product.findOne({ where: { id: id } });
+    if (!product) return { EM: "Product not found.", EC: 404, DT: "" };
+
+    await product.destroy();
+    return { EM: "Delete product successfully.", EC: 0, DT: "" };
+  } catch (error) {
+    console.log("Error in deleteProduct service: ", error);
+    return { EM: "Something wrongs in service...", EC: 500, DT: "" };
+  }
+};
+
+export { getProducts, createProduct, updateProduct, deleteProduct };

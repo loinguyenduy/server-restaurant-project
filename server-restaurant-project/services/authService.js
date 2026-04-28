@@ -167,6 +167,14 @@ const handleLoginUser = async (inputUserData) => {
     });
 
     if (user) {
+      if (user.is_active === false || user.is_active === 0) {
+        return {
+          EM: "Your account has been locked by Administrator.",
+          EC: 403,
+          DT: "",
+        };
+      }
+      
       let isCorrectPassword = await checkPassword(
         inputUserData.password,
         user.password,
