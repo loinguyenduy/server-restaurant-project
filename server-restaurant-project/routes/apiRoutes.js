@@ -6,6 +6,7 @@ import cartRoute from "./cartRoute.js"
 import payosRoute from "./payosRoute.js"
 import orderRoute from "./orderRoute.js"
 import reservationRoute from "./reservationRoute.js"
+import userRoute from "./userRoute.js"
 
 const router = express.Router();
 const apiRoutes = (app) => {
@@ -23,6 +24,8 @@ const apiRoutes = (app) => {
   router.use("/", orderRoute)
   //reservation routes
   router.use("/", reservationRoute)
+  //user routes
+  router.use("/users", userRoute)
 
 
   return app.use("/api/v1/", router);

@@ -1,5 +1,5 @@
 import cron from "node-cron";
-import { Order, OrderItem, Product } from "../models/index.js";
+import { Order, OrderItem, Product, Reservation } from "../models/index.js";
 import { Op } from "sequelize";
 import { sequelize } from "../config/databaseConfig.js";
 
