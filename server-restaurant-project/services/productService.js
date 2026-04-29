@@ -3,22 +3,15 @@ import { Op } from "sequelize";
 
 const getProducts = async (options) => {
   try {
-    //const category_id = categoryFilterId.category_id
-    const { category_id, search, sort, page, limit} = options; //destructuring: get parameters from 'options'
-
-    //initialize condition to query
+    const { category_id, search, sort, page, limit} = options;
     let whereCondition = {}; 
     let orderCondition = [["createdAt", "DESC"]];
+    let offset = (page - 1) * limit;
 
-    let offset = (page - 1) * limit; //offset: amount of page is skipped, ex: page 2 = 9 -> 18 | (2- 1) * 9 = 9 (skip 9 previous page) 
-
-    //filter category
     if (category_id && category_id !== "all") {
       whereCondition.category_id = category_id;
     }
-    // console.log(">>> Check whereCondition:", whereCondition);
 
-    //search by keyword
     if (search) {
       const keyword = search.trim().toLowerCase();
       whereCondition.name = sequelize.where(
@@ -28,7 +21,6 @@ const getProducts = async (options) => {
       )
     }
 
-    //sort by price
     if (sort === "price_asc") {
       orderCondition = [["price", "ASC"]];
     } else if (sort === "price_desc") {
@@ -44,7 +36,6 @@ const getProducts = async (options) => {
       attributes: { exclude: ["updatedAt"] }
     });
 
-    // count total of pages: math.ceil (làm tròn)
     let totalPages = Math.ceil(count / limit);
 
     return {
@@ -79,31 +70,20 @@ const createProduct = async (productData) => {
       is_available,
     } = productData;
 
-    //check name exist
     let checkNameProduct = await Product.findOne({
       where: { name: name },
     });
     if (checkNameProduct) {
-      return {
-        EM: "Product name is already exists.",
-        EC: 409,
-        DT: [],
-      };
+      return { EM: "Product name is already exists.", EC: 409, DT: [] };
     }
 
-    //check category_id exist
     let checkCategory = await Category.findOne({
       where: { id: category_id },
     });
     if (!checkCategory) {
-      return {
-        EM: "Category ID is not available.",
-        EC: 404,
-        DT: [],
-      };
+      return { EM: "Category ID is not available.", EC: 404, DT: [] };
     }
 
-    //create new product
     const newProduct = await Product.create({
       category_id,
       name,
@@ -115,18 +95,10 @@ const createProduct = async (productData) => {
       is_available,
     });
 
-    return {
-      EM: "Create new product successfully.",
-      EC: 0,
-      DT: newProduct,
-    };
+    return { EM: "Create new product successfully.", EC: 0, DT: newProduct };
   } catch (error) {
     console.log("Error in createProduct service: ", error);
-    return {
-      EM: "Something wrongs in service...",
-      EC: 500,
-      DT: [],
-    };
+    return { EM: "Something wrongs in service...", EC: 500, DT: [] };
   }
 };
 
@@ -137,15 +109,21 @@ const updateProduct = async (id, productData) => {
       return { EM: "Product not found.", EC: 404, DT: "" };
     }
 
-    // Nếu có đổi tên, check trùng tên với món khác
     if (productData.name && productData.name !== product.name) {
       let checkName = await Product.findOne({ where: { name: productData.name } });
       if (checkName) return { EM: "Product name already exists.", EC: 409, DT: "" };
     }
 
-    // Nếu không có ảnh mới upload, giữ nguyên ảnh cũ
     if (!productData.image_url) {
       productData.image_url = product.image_url;
+    }
+
+    // Logic quan trọng: Nếu update stock <= 0, tự động ép is_available = false
+    if (productData.stock_quantity !== undefined) {
+      const newStock = parseInt(productData.stock_quantity);
+      if (newStock <= 0) {
+        productData.is_available = false;
+      }
     }
 
     await product.update(productData);

@@ -1,17 +1,13 @@
 import { Order, OrderItem, Cart, CartItem, Product, Table } from "../models/index.js";
 import payOSInstance from "../config/payosConfig.js";
 import { sequelize } from "../config/databaseConfig.js";
+import { Op } from "sequelize";
 
 const createOrderAndPaymentService = async (userId, checkoutData) => {
-  /*
-    transaction: use to ensure that all database operations within the transaction either succeed or fail together. 
-    If any operation fails, the transaction can be rolled back to maintain data integrity.
-    */
   const transaction = await sequelize.transaction();
 
   try {
-    const { address, phone_receiver, note, type, payment_method } =
-      checkoutData;
+    const { address, phone_receiver, note, type, payment_method } = checkoutData;
 
     const cart = await Cart.findOne({
       where: { user_id: userId },
@@ -23,7 +19,7 @@ const createOrderAndPaymentService = async (userId, checkoutData) => {
     }
 
     let totalAmount = 0;
-    // Loop through cart items to calculate total amount and check stock availability
+    
     for (const item of cart.CartItems) {
       if (item.Product && item.Product.is_available) {
         if (item.Product.stock_quantity < item.quantity) {
@@ -35,13 +31,16 @@ const createOrderAndPaymentService = async (userId, checkoutData) => {
           };
         }
 
-        // Calculate total amount based on cart items and their associated products
         totalAmount += parseFloat(item.Product.price) * item.quantity;
 
-        // Update stock_quantity
+        // Trừ tồn kho và tự động cập nhật is_available
+        const newStock = item.Product.stock_quantity - item.quantity;
         await Product.update(
-          { stock_quantity: item.Product.stock_quantity - item.quantity },
-          { where: { id: item.product_id }, transaction },
+          { 
+            stock_quantity: newStock,
+            is_available: newStock > 0
+          },
+          { where: { id: item.product_id }, transaction }
         );
       }
     }
@@ -53,10 +52,10 @@ const createOrderAndPaymentService = async (userId, checkoutData) => {
 
     const roundedTotalAmount = Math.round(finalAmount);
     const payosOrderCode = Number(
-      String(Date.now()).slice(-6) + Math.floor(Math.random() * 100),
+      String(Date.now()).slice(-6) + Math.floor(Math.random() * 100)
     );
 
-    const method = payment_method || "cash"; // default to "cash" if payment_method is not provided
+    const method = payment_method || "cash";
 
     const newOrder = await Order.create(
       {
@@ -72,7 +71,7 @@ const createOrderAndPaymentService = async (userId, checkoutData) => {
         note: note,
         order_status: method === "cash" ? "processing" : "pending",
       },
-      { transaction },
+      { transaction }
     );
 
     const orderItemsData = cart.CartItems.map((item) => {
@@ -83,9 +82,7 @@ const createOrderAndPaymentService = async (userId, checkoutData) => {
         price: item.Product.price,
       };
     });
-    // use bulkCreate to insert multiple order items at once, which is more efficient than inserting them one by one.
-    // compare to create(), bulkCreate() allows you to insert multiple records in a single query, such as inserting multiple order items for a single order,
-    // which can significantly improve performance when dealing with large datasets.
+    
     await OrderItem.bulkCreate(orderItemsData, { transaction });
 
     if (method === "cash") {
@@ -105,14 +102,7 @@ const createOrderAndPaymentService = async (userId, checkoutData) => {
         cancelUrl: process.env.PAYOS_CANCEL_URL,
       };
 
-      // call PayOS API to create a payment request and get the payment link
-      const paymentLinkResponse =
-        await payOSInstance.paymentRequests.create(bodyPayOS);
-
-      /*
-        commit: If all operations within the transaction are successful, the transaction is committed, 
-        which means that all changes made to the database during the transaction are saved permanently.
-        */
+      const paymentLinkResponse = await payOSInstance.paymentRequests.create(bodyPayOS);
       await transaction.commit();
 
       return {
@@ -147,36 +137,20 @@ const getUserOrdersService = async (userId) => {
     });
 
     if (!orders || orders.length === 0) {
-      return {
-        EC: 404,
-        EM: "No orders found",
-        DT: [],
-      };
+      return { EC: 404, EM: "No orders found", DT: [] };
     }
 
-    return {
-      EC: 0,
-      EM: "Get user orders successfully",
-      DT: orders,
-    };
+    return { EC: 0, EM: "Get user orders successfully", DT: orders };
   } catch (error) {
     console.error(">>> Error in getUserOrdersService:", error);
-    return {
-      EC: 500,
-      EM: "Internal server error while fetching orders",
-      DT: "",
-    };
+    return { EC: 500, EM: "Internal server error while fetching orders", DT: "" };
   }
 };
 
-// This function allows users to re-create a payment link for an order that is still pending payment.
 const reCreatePaymentLinkService = async (userId, orderId) => {
   try {
     const order = await Order.findOne({
-      where: {
-        id: orderId,
-        user_id: userId,
-      },
+      where: { id: orderId, user_id: userId },
     });
 
     if (!order) {
@@ -199,12 +173,10 @@ const reCreatePaymentLinkService = async (userId, orderId) => {
       };
     }
 
-    // create new unique order code for PayOS to avoid conflicts with previous payment link
     const newPayosOrderCode = Number(
-      String(Date.now()).slice(-6) + Math.floor(Math.random() * 100),
+      String(Date.now()).slice(-6) + Math.floor(Math.random() * 100)
     );
 
-    // update order's transaction_id with the new PayOS order code
     await order.update({ transaction_id: String(newPayosOrderCode) });
 
     const bodyPayOS = {
@@ -215,8 +187,7 @@ const reCreatePaymentLinkService = async (userId, orderId) => {
       cancelUrl: process.env.PAYOS_CANCEL_URL,
     };
 
-    const paymentLinkResponse =
-      await payOSInstance.paymentRequests.create(bodyPayOS);
+    const paymentLinkResponse = await payOSInstance.paymentRequests.create(bodyPayOS);
 
     return {
       EC: 0,
@@ -225,14 +196,9 @@ const reCreatePaymentLinkService = async (userId, orderId) => {
     };
   } catch (error) {
     console.error(">>> Error in reCreatePaymentLinkService:", error);
-    return {
-      EC: 500,
-      EM: "Internal server error while re-creating payment link",
-      DT: "",
-    };
+    return { EC: 500, EM: "Internal server error while re-creating payment link", DT: "" };
   }
 };
-
 
 const getAllOrdersService = async (options) => {
     try {
@@ -240,12 +206,10 @@ const getAllOrdersService = async (options) => {
         let whereCondition = {};
         let offset = (page - 1) * limit;
 
-        // Lọc theo trạng thái (pending, processing, completed, cancelled)
         if (status && status !== 'all') {
             whereCondition.order_status = status;
         }
 
-        // Tìm kiếm theo số điện thoại người nhận hoặc Mã đơn hàng (transaction_id)
         if (search) {
             const keyword = search.trim();
             whereCondition = {
@@ -293,7 +257,6 @@ const getAllOrdersService = async (options) => {
 
 const updateOrderStatusService = async (orderId, newStatus) => {
     try {
-        // Chỉ cho phép các trạng thái hợp lệ
         const validStatuses = ['pending', 'processing', 'completed', 'cancelled'];
         if (!validStatuses.includes(newStatus)) {
             return { EC: 400, EM: "Invalid order status", DT: "" };
@@ -314,20 +277,21 @@ const updateOrderStatusService = async (orderId, newStatus) => {
 
         let updateData = { order_status: newStatus };
 
-        // Nếu đơn hàng được đánh dấu là Completed
         if (newStatus === 'completed') {
-            // Và nếu là thanh toán tiền mặt (Cash), ta tự động coi như đã thu tiền
             if (order.payment_method === 'cash') {
                 updateData.payment_status = 'paid';
             }
         }
 
-        // Nếu đơn hàng bị Hủy (Cancelled), ta nên cập nhật trạng thái thanh toán (nếu cần)
         if (newStatus === 'cancelled' && order.payment_status === 'pending') {
             updateData.payment_status = 'failed'; 
         }
 
         await order.update(updateData);
+
+        if ((newStatus === 'completed' || newStatus === 'cancelled') && order.table_id) {
+            await Table.update({ status: 'available' }, { where: { id: order.table_id } });
+        }
 
         return {
             EC: 0,
@@ -343,8 +307,8 @@ const updateOrderStatusService = async (orderId, newStatus) => {
 const createPosOrderService = async (staffId, posData) => {
     const transaction = await sequelize.transaction();
     try {
-        // items: mảng các object { product_id, quantity }
-        const { table_id, items, payment_method, note } = posData;
+        // Nhận thêm return_url và cancel_url từ Frontend gửi lên
+        const { table_id, items, payment_method, note, return_url, cancel_url } = posData;
 
         if (!items || items.length === 0) {
             return { EC: 400, EM: "No items in the order", DT: "" };
@@ -353,7 +317,6 @@ const createPosOrderService = async (staffId, posData) => {
         let totalAmount = 0;
         let orderItemsData = [];
 
-        // 1. Kiểm tra tồn kho và tính tiền
         for (const item of items) {
             const product = await Product.findByPk(item.product_id, { transaction });
             if (!product || !product.is_available) {
@@ -368,13 +331,15 @@ const createPosOrderService = async (staffId, posData) => {
 
             totalAmount += parseFloat(product.price) * item.quantity;
 
-            // Trừ tồn kho
+            const newStock = product.stock_quantity - item.quantity;
             await product.update(
-                { stock_quantity: product.stock_quantity - item.quantity },
+                { 
+                    stock_quantity: newStock,
+                    is_available: newStock > 0 
+                },
                 { transaction }
             );
 
-            // Chuẩn bị data cho OrderItem
             orderItemsData.push({
                 product_id: product.id,
                 quantity: item.quantity,
@@ -384,16 +349,14 @@ const createPosOrderService = async (staffId, posData) => {
 
         const taxRate = 0.08;
         const taxAmount = totalAmount * taxRate;
-        // Đơn offline không có phí ship
         const finalAmount = totalAmount + taxAmount; 
         const roundedTotalAmount = Math.round(finalAmount);
         
         const payosOrderCode = Number(String(Date.now()).slice(-6) + Math.floor(Math.random() * 100));
         const method = payment_method || "cash";
 
-        // 2. Tạo đơn hàng (Offline)
         const newOrder = await Order.create({
-            user_id: staffId, // Lưu ID của Staff tạo đơn
+            user_id: staffId, 
             table_id: table_id || null,
             type: "offline",
             total_amount: totalAmount,
@@ -401,30 +364,28 @@ const createPosOrderService = async (staffId, posData) => {
             payment_method: method,
             payment_status: "pending",
             transaction_id: String(payosOrderCode),
-            order_status: "processing", // Bếp bắt đầu làm luôn
+            order_status: "processing", 
             note: note || ""
         }, { transaction });
 
-        // Gắn order_id vào mảng OrderItems
         const finalOrderItems = orderItemsData.map(item => ({ ...item, order_id: newOrder.id }));
         await OrderItem.bulkCreate(finalOrderItems, { transaction });
 
-        // 3. Cập nhật trạng thái Bàn (Nếu có table_id)
         if (table_id) {
             await Table.update({ status: 'occupied' }, { where: { id: table_id }, transaction });
         }
 
-        // 4. Xử lý thanh toán
         if (method === "cash") {
             await transaction.commit();
             return { EC: 0, EM: "Create POS order successfully (Cash)", DT: newOrder };
         } else {
+            // DÙNG URL TỪ FRONTEND ĐỂ REDIRECT ĐÚNG VỀ TRANG POS
             const bodyPayOS = {
                 orderCode: payosOrderCode,
                 amount: roundedTotalAmount,
                 description: `POS ${String(payosOrderCode)}`,
-                returnUrl: process.env.PAYOS_RETURN_URL,
-                cancelUrl: process.env.PAYOS_CANCEL_URL,
+                returnUrl: return_url || process.env.PAYOS_RETURN_URL, // Ưu tiên URL từ POS
+                cancelUrl: cancel_url || process.env.PAYOS_CANCEL_URL,
             };
             const paymentLinkResponse = await payOSInstance.paymentRequests.create(bodyPayOS);
             await transaction.commit();
