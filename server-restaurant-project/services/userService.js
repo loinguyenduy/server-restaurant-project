@@ -1,5 +1,5 @@
 import bcrypt from "bcryptjs";
-import { User } from "../models/index.js";
+import { sequelize, User } from "../models/index.js";
 import { Op } from "sequelize";
 
 // Hàm băm mật khẩu

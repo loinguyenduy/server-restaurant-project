@@ -1,9 +1,13 @@
+import { Op } from "sequelize";
 import { Order, User, Reservation } from "../models/index.js";
 
 const getDashboardStatsService = async () => {
     try {
         // 1. Tổng doanh thu (Chỉ tính đơn đã Paid)
-        const totalRevenue = await Order.sum('final_amount', { where: { payment_status: 'paid' } });
+        const totalRevenue = await Order.sum('final_amount', { where: { 
+            payment_status: 'paid',
+            order_status: 'completed' 
+        } });
 
         // 2. Tổng đơn hàng đã hoàn thành
         const totalOrders = await Order.count({ where: { order_status: 'completed' } });
@@ -12,7 +16,9 @@ const getDashboardStatsService = async () => {
         const totalUsers = await User.count({ where: { role: 'customer' } });
 
         // 4. Tổng số lượt đặt bàn
-        const totalReservations = await Reservation.count();
+        const totalReservations = await Reservation.count({
+            where: { status: { [Op.ne]: 'cancelled' } }
+        });
 
         return {
             EC: 0,
