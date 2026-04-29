@@ -1,4 +1,4 @@
-import { Order, OrderItem, Cart, CartItem, Product } from "../models/index.js";
+import { Order, OrderItem, Cart, CartItem, Product, Table } from "../models/index.js";
 import payOSInstance from "../config/payosConfig.js";
 import { sequelize } from "../config/databaseConfig.js";
 
@@ -266,6 +266,10 @@ const getAllOrdersService = async (options) => {
                 {
                     model: OrderItem,
                     include: [{ model: Product, attributes: ["id", "name", "image_url"] }]
+                },
+                {
+                    model: Table,
+                    attributes: ["table_number"]
                 }
             ]
         });
@@ -336,10 +340,109 @@ const updateOrderStatusService = async (orderId, newStatus) => {
     }
 };
 
+const createPosOrderService = async (staffId, posData) => {
+    const transaction = await sequelize.transaction();
+    try {
+        // items: mảng các object { product_id, quantity }
+        const { table_id, items, payment_method, note } = posData;
+
+        if (!items || items.length === 0) {
+            return { EC: 400, EM: "No items in the order", DT: "" };
+        }
+
+        let totalAmount = 0;
+        let orderItemsData = [];
+
+        // 1. Kiểm tra tồn kho và tính tiền
+        for (const item of items) {
+            const product = await Product.findByPk(item.product_id, { transaction });
+            if (!product || !product.is_available) {
+                await transaction.rollback();
+                return { EC: 404, EM: `Product not found or unavailable: ${item.product_id}`, DT: "" };
+            }
+
+            if (product.stock_quantity < item.quantity) {
+                await transaction.rollback();
+                return { EC: 400, EM: `Not enough stock for product: ${product.name}`, DT: "" };
+            }
+
+            totalAmount += parseFloat(product.price) * item.quantity;
+
+            // Trừ tồn kho
+            await product.update(
+                { stock_quantity: product.stock_quantity - item.quantity },
+                { transaction }
+            );
+
+            // Chuẩn bị data cho OrderItem
+            orderItemsData.push({
+                product_id: product.id,
+                quantity: item.quantity,
+                price: product.price
+            });
+        }
+
+        const taxRate = 0.08;
+        const taxAmount = totalAmount * taxRate;
+        // Đơn offline không có phí ship
+        const finalAmount = totalAmount + taxAmount; 
+        const roundedTotalAmount = Math.round(finalAmount);
+        
+        const payosOrderCode = Number(String(Date.now()).slice(-6) + Math.floor(Math.random() * 100));
+        const method = payment_method || "cash";
+
+        // 2. Tạo đơn hàng (Offline)
+        const newOrder = await Order.create({
+            user_id: staffId, // Lưu ID của Staff tạo đơn
+            table_id: table_id || null,
+            type: "offline",
+            total_amount: totalAmount,
+            final_amount: finalAmount,
+            payment_method: method,
+            payment_status: "pending",
+            transaction_id: String(payosOrderCode),
+            order_status: "processing", // Bếp bắt đầu làm luôn
+            note: note || ""
+        }, { transaction });
+
+        // Gắn order_id vào mảng OrderItems
+        const finalOrderItems = orderItemsData.map(item => ({ ...item, order_id: newOrder.id }));
+        await OrderItem.bulkCreate(finalOrderItems, { transaction });
+
+        // 3. Cập nhật trạng thái Bàn (Nếu có table_id)
+        if (table_id) {
+            await Table.update({ status: 'occupied' }, { where: { id: table_id }, transaction });
+        }
+
+        // 4. Xử lý thanh toán
+        if (method === "cash") {
+            await transaction.commit();
+            return { EC: 0, EM: "Create POS order successfully (Cash)", DT: newOrder };
+        } else {
+            const bodyPayOS = {
+                orderCode: payosOrderCode,
+                amount: roundedTotalAmount,
+                description: `POS ${String(payosOrderCode)}`,
+                returnUrl: process.env.PAYOS_RETURN_URL,
+                cancelUrl: process.env.PAYOS_CANCEL_URL,
+            };
+            const paymentLinkResponse = await payOSInstance.paymentRequests.create(bodyPayOS);
+            await transaction.commit();
+            return { EC: 0, EM: "Create POS order successfully (PayOS)", DT: paymentLinkResponse.checkoutUrl };
+        }
+
+    } catch (error) {
+        await transaction.rollback();
+        console.error(">>> Error in createPosOrderService:", error);
+        return { EC: 500, EM: "Internal server error", DT: "" };
+    }
+};
+
 export {
   createOrderAndPaymentService,
   getUserOrdersService,
   reCreatePaymentLinkService,
   getAllOrdersService,
-  updateOrderStatusService
+  updateOrderStatusService,
+  createPosOrderService
 };

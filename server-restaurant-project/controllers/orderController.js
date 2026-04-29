@@ -3,7 +3,8 @@ import {
     getUserOrdersService, 
     reCreatePaymentLinkService,
     getAllOrdersService,
-    updateOrderStatusService
+    updateOrderStatusService,
+    createPosOrderService
 } from "../services/orderService.js";
 
 const handleCheckout = async (req, res) => {
@@ -123,4 +124,20 @@ const handleUpdateOrderStatus = async (req, res) => {
     }
 };
 
-export { handleCheckout, handleGetUserOrders, handleRePayOrder, handleGetAllOrders, handleUpdateOrderStatus };
+const handleCreatePosOrder = async (req, res) => {
+    try {
+        const staffId = req.user.id;
+        let data = await createPosOrderService(staffId, req.body);
+        
+        return res.status(200).json({
+            EM: data.EM,
+            EC: data.EC,
+            DT: data.DT
+        });
+    } catch (error) {
+        console.error(">>> Error in handleCreatePosOrder:", error);
+        return res.status(500).json({ EM: "Internal Server Error", EC: 500 });
+    }
+};
+
+export { handleCheckout, handleGetUserOrders, handleRePayOrder, handleGetAllOrders, handleUpdateOrderStatus, handleCreatePosOrder };
