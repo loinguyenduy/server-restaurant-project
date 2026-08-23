@@ -19,7 +19,8 @@ const Table = sequelize.define(
       allowNull: false,
     },
     status: {
-      type: DataTypes.ENUM("available", "occupied", "reserved"),
+      type: DataTypes.ENUM("available", "occupied", "reserved", "out_of_service"),
+      allowNull: false,
       defaultValue: "available",
     },
     qr_code_url: {

@@ -2,8 +2,10 @@ import cron from "node-cron";
 import { Order, Reservation } from "../models/index.js";
 import { Op } from "sequelize";
 import { expirePendingOrderService } from "../services/orderService.js";
+import { expirePendingReservationService } from "../services/reservationService.js";
 import { emitProductAvailability, emitToOperations, emitToUser } from "../socket/socket.js";
 import payOSInstance from "../config/payosConfig.js";
+import { NO_SHOW_GRACE_MINUTES, addWallClockMinutes, getRestaurantWallClockNow } from "../utils/reservationTime.js";
 
 const initCronJobs = () => {
   // Schedule a cron job to run every 15 minutes
@@ -64,26 +66,25 @@ const initCronJobs = () => {
     console.log(">>> Checking for expired pending reservations...");
     try {
       // Mốc thời gian: Hiện tại trừ đi 15 phút
-      const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000);
+      const threshold = addWallClockMinutes(getRestaurantWallClockNow(), -NO_SHOW_GRACE_MINUTES);
 
       // Tìm và cập nhật: Những đơn pending có giờ hẹn nhỏ hơn (trước) mốc 15 phút trước
-      const [affectedCount] = await Reservation.update(
-        { status: "cancelled" },
-        {
-          where: {
-            status: "pending",
-            reservation_time: {
-              [Op.lt]: fifteenMinutesAgo,
-            },
-          },
-        },
-      );
-
-      if (affectedCount > 0) {
-        console.log(
-          `>>> Successfully auto-cancelled ${affectedCount} expired reservations.`,
-        );
+      const candidates = await Reservation.findAll({
+        where: { status: "pending", reservation_time: { [Op.lt]: threshold } },
+        attributes: ["id"],
+      });
+      let affectedCount = 0;
+      for (const candidate of candidates) {
+        const result = await expirePendingReservationService(candidate.id);
+        if (result.EC === 0 && result.DT?.expired) {
+          affectedCount += 1;
+          const reservation = result.DT.reservation;
+          const payload = { reservationId: reservation.id, status: reservation.status, changedAt: new Date().toISOString() };
+          emitToUser(reservation.user_id, "reservation:status_changed", payload);
+          emitToOperations("reservation:status_changed", payload);
+        }
       }
+      if (affectedCount > 0) console.log(`>>> Successfully auto-cancelled ${affectedCount} expired reservations.`);
     } catch (error) {
       console.error(">>> Error in Reservation Cron Job:", error);
     }

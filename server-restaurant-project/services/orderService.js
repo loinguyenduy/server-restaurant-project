@@ -8,6 +8,7 @@ import {
   OrderStatusHistory,
   Product,
   Table,
+  User,
 } from "../models/index.js";
 import { sequelize } from "../config/databaseConfig.js";
 import { getCartData } from "./cartService.js";
@@ -32,7 +33,34 @@ const ORDER_DETAIL_INCLUDE = [
 ];
 
 const LEGACY_PENDING_STATUSES = ["pending", "pending_payment"];
+const ORDER_STATUSES = ["pending", "processing", "pending_payment", "confirmed", "preparing", "ready", "completed", "cancelled"];
+const PAYMENT_STATUSES = ["pending", "paid", "failed", "refunded"];
+const PAYMENT_METHODS = ["cash", "payos", "card", "legacy_unknown"];
+const FULFILLMENT_TYPES = ["takeaway", "dine_in", "legacy"];
+const TABLE_ACTIVE_ORDER_STATUSES = ["pending", "pending_payment", "confirmed", "preparing", "processing", "ready"];
 const makeResult = (EC, EM, DT = "") => ({ EC, EM, DT });
+
+const parsePositiveInteger = (value, fallback, maximum = 100) => {
+  if (value === undefined || value === null || value === "") return fallback;
+  if (!/^\d+$/.test(String(value))) return null;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed >= 1 && parsed <= maximum ? parsed : null;
+};
+
+const parseDateBoundary = (value, useNextDay = false) => {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(value || ""))) return null;
+  const boundary = new Date(`${value}T00:00:00+07:00`);
+  if (Number.isNaN(boundary.getTime())) return null;
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Ho_Chi_Minh",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  if (formatter.format(boundary) !== value) return null;
+  if (useNextDay) boundary.setUTCDate(boundary.getUTCDate() + 1);
+  return boundary;
+};
 
 const rollbackIfNeeded = async (transaction) => {
   if (transaction && !transaction.finished) await transaction.rollback();
@@ -104,6 +132,24 @@ const loadOrderDetails = async (orderId, where = {}) => {
   const order = await Order.findOne({
     where: { id: orderId, ...where },
     include: ORDER_DETAIL_INCLUDE,
+  });
+  return serializeOrder(order);
+};
+
+const loadManagedOrderDetails = async (orderId) => {
+  const order = await Order.findByPk(orderId, {
+    include: [
+      ORDER_ITEM_INCLUDE,
+      { model: Table, attributes: ["id", "table_number", "capacity"] },
+      { model: User, attributes: ["id", "username", "full_name", "email", "phone_number"] },
+      {
+        model: OrderStatusHistory,
+        as: "StatusHistory",
+        separate: true,
+        order: [["createdAt", "ASC"]],
+        include: [{ model: User, as: "ChangedBy", attributes: ["id", "full_name", "role"] }],
+      },
+    ],
   });
   return serializeOrder(order);
 };
@@ -438,33 +484,76 @@ const expirePendingOrderService = async (orderId) => {
 
 const getAllOrdersService = async (options) => {
   try {
-    const page = Math.max(Number.parseInt(options.page, 10) || 1, 1);
-    const limit = Math.min(Math.max(Number.parseInt(options.limit, 10) || 10, 1), 100);
+    const page = parsePositiveInteger(options.page, 1, 100000);
+    const limit = parsePositiveInteger(options.limit, 20, 100);
+    if (!page || !limit) return makeResult(400, "Page and limit must be positive integers within the supported range.");
+
     const where = {};
-    if (options.status && options.status !== "all") where.order_status = options.status;
+    const status = String(options.status || "all").trim().toLowerCase();
+    const paymentStatus = String(options.paymentStatus || "all").trim().toLowerCase();
+    const paymentMethod = String(options.paymentMethod || "all").trim().toLowerCase();
+    const fulfillmentType = String(options.fulfillmentType || "all").trim().toLowerCase();
+    if (status !== "all" && !ORDER_STATUSES.includes(status)) return makeResult(400, "Invalid order status filter.");
+    if (paymentStatus !== "all" && !PAYMENT_STATUSES.includes(paymentStatus)) return makeResult(400, "Invalid payment status filter.");
+    if (paymentMethod !== "all" && !PAYMENT_METHODS.includes(paymentMethod)) return makeResult(400, "Invalid payment method filter.");
+    if (fulfillmentType !== "all" && !FULFILLMENT_TYPES.includes(fulfillmentType)) return makeResult(400, "Invalid fulfillment filter.");
+    if (status !== "all") where.order_status = status;
+    if (paymentStatus !== "all") where.payment_status = paymentStatus;
+    if (paymentMethod !== "all") where.payment_method = paymentMethod === "legacy_unknown" ? null : paymentMethod;
+    if (fulfillmentType !== "all") where.fulfillment_type = fulfillmentType === "legacy" ? null : fulfillmentType;
+
     const keyword = String(options.search || "").trim();
+    if (keyword.length > 100) return makeResult(400, "Search must be 100 characters or fewer.");
     if (keyword) {
       where[Op.or] = [
+        { id: { [Op.like]: `%${keyword}%` } },
+        { contact_name: { [Op.like]: `%${keyword}%` } },
         { phone_receiver: { [Op.like]: `%${keyword}%` } },
         { transaction_id: { [Op.like]: `%${keyword}%` } },
       ];
     }
+
+    if (options.dateFrom || options.dateTo) {
+      const from = options.dateFrom ? parseDateBoundary(options.dateFrom) : null;
+      const to = options.dateTo ? parseDateBoundary(options.dateTo, true) : null;
+      if ((options.dateFrom && !from) || (options.dateTo && !to)) return makeResult(400, "Date filters must use YYYY-MM-DD.");
+      if (from && to && from >= to) return makeResult(400, "The start date must not be after the end date.");
+      where.createdAt = {};
+      if (from) where.createdAt[Op.gte] = from;
+      if (to) where.createdAt[Op.lt] = to;
+    }
+
     const { count, rows } = await Order.findAndCountAll({
       where,
       order: [["createdAt", "DESC"]],
       limit,
       offset: (page - 1) * limit,
       distinct: true,
-      include: [ORDER_ITEM_INCLUDE, { model: Table, attributes: ["table_number"] }],
+      include: [
+        { model: Table, attributes: ["id", "table_number"] },
+        { model: User, attributes: ["id", "username", "full_name"] },
+      ],
     });
     return makeResult(0, "Orders retrieved successfully.", {
       totalRows: count,
       totalPages: Math.ceil(count / limit),
+      page,
+      limit,
       orders: rows.map(serializeOrder),
     });
   } catch (error) {
     console.error("Error while retrieving managed orders:", error);
     return makeResult(500, "Unable to retrieve orders.");
+  }
+};
+
+const getManagedOrderDetailsService = async (orderId) => {
+  try {
+    const order = await loadManagedOrderDetails(orderId);
+    return order ? makeResult(0, "Order retrieved successfully.", order) : makeResult(404, "Order not found.");
+  } catch (error) {
+    console.error("Error while retrieving managed order details:", error);
+    return makeResult(500, "Unable to retrieve the order.");
   }
 };
 
@@ -545,11 +634,15 @@ const updateOrderStatusService = async (orderId, newStatus, actor) => {
     }
     await order.update(updateData, { transaction });
 
+    let tableChange = null;
     if (["completed", "cancelled"].includes(newStatus) && order.table_id) {
-      await Table.update(
-        { status: "available" },
-        { where: { id: order.table_id }, transaction },
-      );
+      const table = await Table.findByPk(order.table_id, { transaction, lock: transaction.LOCK.UPDATE });
+      if (table) {
+        const otherActiveOrder = await Order.findOne({ where: { table_id: order.table_id, order_status: { [Op.in]: TABLE_ACTIVE_ORDER_STATUSES } }, transaction });
+        const nextTableStatus = otherActiveOrder ? "occupied" : "available";
+        if (table.status !== nextTableStatus) await table.update({ status: nextTableStatus }, { transaction });
+        tableChange = { tableId: table.id, status: nextTableStatus, changeType: "order_released" };
+      }
     }
     await OrderStatusHistory.create({
       order_id: order.id,
@@ -566,6 +659,7 @@ const updateOrderStatusService = async (orderId, newStatus, actor) => {
       order: await loadOrderDetails(order.id),
       productChanges,
       paymentChanged: previousPaymentStatus !== order.payment_status,
+      tableChange,
     });
   } catch (error) {
     await rollbackIfNeeded(transaction);
@@ -611,12 +705,25 @@ const createPosOrderService = async (staffId, posData) => {
       snapshots.push({ product, product_id: product.id, quantity: item.quantity, price, prep_time_minutes: Number(product.prep_time_minutes) || 15 });
     }
     const tax = Math.round(subtotal * 0.08);
+    if (!posData.table_id) {
+      await transaction.rollback();
+      return makeResult(400, "A table is required for a POS order.");
+    }
+    const table = await Table.findByPk(posData.table_id, { transaction, lock: transaction.LOCK.UPDATE });
+    if (!table) {
+      await transaction.rollback();
+      return makeResult(404, "The selected table no longer exists.");
+    }
+    if (table.status !== "available") {
+      await transaction.rollback();
+      return makeResult(409, "The selected table is no longer available.");
+    }
     const method = posData.payment_method === "payos" ? "payos" : "cash";
     const status = method === "payos" ? "pending_payment" : "confirmed";
     const orderCode = method === "payos" ? createPayOSOrderCode() : null;
     const order = await Order.create({
       user_id: staffId,
-      table_id: posData.table_id || null,
+      table_id: table.id,
       type: "offline",
       fulfillment_type: "dine_in",
       source: "pos",
@@ -648,9 +755,7 @@ const createPosOrderService = async (staffId, posData) => {
       changed_by: staffId,
       note: "POS order created.",
     }, { transaction });
-    if (order.table_id) {
-      await Table.update({ status: "occupied" }, { where: { id: order.table_id }, transaction });
-    }
+    await table.update({ status: "occupied" }, { transaction });
     await transaction.commit();
 
     let checkoutUrl = null;
@@ -667,6 +772,7 @@ const createPosOrderService = async (staffId, posData) => {
       order: await loadOrderDetails(order.id),
       checkoutUrl,
       paymentLinkAvailable,
+      tableChange: { tableId: table.id, status: "occupied", changeType: "pos_order_created" },
       productChanges: snapshots.map((item) => ({
         productId: item.product.id,
         stock_quantity: item.product.stock_quantity,
@@ -686,6 +792,7 @@ export {
   createPosOrderService,
   expirePendingOrderService,
   getAllOrdersService,
+  getManagedOrderDetailsService,
   getKitchenOrdersService,
   getUserOrderDetailsService,
   getUserOrdersService,

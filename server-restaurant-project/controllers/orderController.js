@@ -4,6 +4,7 @@ import {
   createPosOrderService,
   getAllOrdersService,
   getKitchenOrdersService,
+  getManagedOrderDetailsService,
   getUserOrderDetailsService,
   getUserOrdersService,
   reCreatePaymentLinkService,
@@ -30,6 +31,11 @@ const sendResult = (res, result, successStatus = 200) => {
 
 const emitProductChanges = (changes = []) => {
   changes.forEach((change) => emitProductAvailability(change));
+};
+
+const emitTableChange = (change) => {
+  if (!change) return;
+  emitToOperations("table:status_changed", { ...change, changedAt: new Date().toISOString() });
 };
 
 const emitOrderStatus = (order) => {
@@ -143,6 +149,18 @@ const handleGetAllOrders = async (req, res) => {
   }
 };
 
+const handleGetManagedOrderDetails = async (req, res) => {
+  try {
+    if (!uuidPattern.test(req.params.id || "")) {
+      return res.status(400).json({ EC: 400, EM: "A valid order ID is required.", DT: "" });
+    }
+    return sendResult(res, await getManagedOrderDetailsService(req.params.id));
+  } catch (error) {
+    console.error("Error in managed order details controller:", error);
+    return res.status(500).json({ EC: 500, EM: "Server error.", DT: "" });
+  }
+};
+
 const handleGetKitchenOrders = async (req, res) => {
   try {
     return sendResult(res, await getKitchenOrdersService());
@@ -162,6 +180,7 @@ const handleUpdateOrderStatus = async (req, res) => {
     const result = await updateOrderStatusService(req.params.id, status, req.user);
     if (result.EC === 0) {
       emitProductChanges(result.DT.productChanges);
+      emitTableChange(result.DT.tableChange);
       emitOrderStatus(result.DT.order);
       if (result.DT.paymentChanged) {
         const payload = { orderId: result.DT.order.id, paymentStatus: result.DT.order.payment_status, changedAt: new Date().toISOString() };
@@ -181,6 +200,7 @@ const handleCreatePosOrder = async (req, res) => {
     const result = await createPosOrderService(req.user.id, req.body);
     if (result.EC === 0) {
       emitProductChanges(result.DT.productChanges);
+      emitTableChange(result.DT.tableChange);
       if (result.DT.order.order_status === "confirmed") {
         emitToKitchen("order:new", { orderId: result.DT.order.id, confirmedAt: new Date().toISOString() });
       }
@@ -198,6 +218,7 @@ export {
   handleCreatePosOrder,
   handleGetAllOrders,
   handleGetKitchenOrders,
+  handleGetManagedOrderDetails,
   handleGetUserOrderDetails,
   handleGetUserOrders,
   handleRePayOrder,

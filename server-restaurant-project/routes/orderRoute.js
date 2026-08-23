@@ -5,6 +5,7 @@ import {
   handleCreatePosOrder,
   handleGetAllOrders,
   handleGetKitchenOrders,
+  handleGetManagedOrderDetails,
   handleGetUserOrderDetails,
   handleGetUserOrders,
   handleRePayOrder,
@@ -26,6 +27,7 @@ router.post("/orders/re-pay", checkUserJWT, customerOnly, handleRePayOrder);
 // Route của Admin & Staff
 router.get("/manage/orders", checkUserJWT, checkUserPermission(["admin", "staff"]), handleGetAllOrders);
 router.get("/manage/orders/kitchen", checkUserJWT, checkUserPermission(["admin", "staff"]), handleGetKitchenOrders);
+router.get("/manage/orders/:id", checkUserJWT, checkUserPermission(["admin", "staff"]), handleGetManagedOrderDetails);
 router.put("/manage/orders/:id/status", checkUserJWT, checkUserPermission(["admin", "staff"]), handleUpdateOrderStatus);
 router.post("/manage/orders/pos", checkUserJWT, checkUserPermission(["admin", "staff"]), handleCreatePosOrder);
 
