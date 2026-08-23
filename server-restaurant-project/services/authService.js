@@ -73,6 +73,23 @@ const checkExistingData = async (email, username, phone) => {
 
 const handleRegisterUser = async (rawUserData) => {
   try {
+    const email = String(rawUserData.email || "").trim().toLowerCase();
+    const username = String(rawUserData.username || "").trim();
+    const fullName = String(rawUserData.full_name || "").trim();
+    const phoneNumber = String(rawUserData.phone_number || "").trim();
+    const gender = String(rawUserData.gender || "other").trim();
+
+    if (!email || !username || !fullName) {
+      return { EM: "Email, username, and full name are required.", EC: 400 };
+    }
+
+    if (phoneNumber && !/^[0-9]+$/.test(phoneNumber)) {
+      return { EM: "Phone number must contain only digits.", EC: 400 };
+    }
+
+    if (!["male", "female", "other"].includes(gender)) {
+      return { EM: "Gender must be male, female, or other.", EC: 400 };
+    }
     //Check existing email, phone number
     // let isEmailExist = await checkExistingEmail(rawUserData.email);
     // if (isEmailExist === true) {
@@ -98,9 +115,9 @@ const handleRegisterUser = async (rawUserData) => {
     //   };
     // }
     const isExistData = await checkExistingData(
-      rawUserData.email,
-      rawUserData.username,
-      rawUserData.phone_number,
+      email,
+      username,
+      phoneNumber,
     );
 
     if (isExistData) {
@@ -114,19 +131,15 @@ const handleRegisterUser = async (rawUserData) => {
     let hashPassword = await hashUserPassword(rawUserData.password);
     //Register user
     const userData = {
-      email: rawUserData.email,
+      email,
       password: hashPassword,
-      username: rawUserData.username,
-      full_name: rawUserData.full_name,
-      gender: rawUserData.gender,
-      phone_number: rawUserData.phone_number || null,
+      username,
+      full_name: fullName,
+      gender,
+      phone_number: phoneNumber || null,
       role: "customer",
       avatar_url: rawUserData.avatar_url || null,
     };
-
-    if (rawUserData.gender && rawUserData.gender.trim() !== "") {
-      userData.gender = rawUserData.gender;
-    }
 
     await User.create(userData);
 
@@ -157,11 +170,12 @@ const checkPassword = async (inputPassword, hashPassword) => {
 
 const handleLoginUser = async (inputUserData) => {
   try {
+    const valueLogin = String(inputUserData.valueLogin || "").trim();
     let user = await User.findOne({
       where: {
         [Op.or]: [
-          { email: inputUserData.valueLogin },
-          { phone_number: inputUserData.valueLogin },
+          { email: valueLogin.toLowerCase() },
+          { phone_number: valueLogin },
         ],
       },
     });
@@ -251,6 +265,14 @@ const handleRefreshToken = async (cookieToken) => {
       return {
         EM: "User no longer exists.",
         EC: 401,
+        DT: "",
+      };
+    }
+
+    if (user.is_active === false || user.is_active === 0) {
+      return {
+        EM: "Your account has been locked by Administrator.",
+        EC: 403,
         DT: "",
       };
     }

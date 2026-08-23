@@ -22,6 +22,10 @@ const changePasswordService = async (userId, oldPassword, newPassword) => {
             return { EC: 400, EM: "Your current password is incorrect.", DT: "" };
         }
 
+        if (oldPassword === newPassword) {
+            return { EC: 400, EM: "New password must be different from the current password.", DT: "" };
+        }
+
         // 3. Nếu khớp, mã hóa mật khẩu mới
         const hashedNewPassword = await hashUserPassword(newPassword);
 
@@ -43,7 +47,21 @@ const changePasswordService = async (userId, oldPassword, newPassword) => {
 const updateProfileService = async (userId, updateData) => {
     try {
         // Chỉ bóc tách những trường được phép sửa
-        const { full_name, phone_number, gender } = updateData;
+        const hasFullName = Object.prototype.hasOwnProperty.call(updateData, "full_name");
+        const hasPhoneNumber = Object.prototype.hasOwnProperty.call(updateData, "phone_number");
+        const hasGender = Object.prototype.hasOwnProperty.call(updateData, "gender");
+
+        if (!hasFullName && !hasPhoneNumber && !hasGender) {
+            return { EC: 400, EM: "No supported profile fields were provided.", DT: "" };
+        }
+
+        const fullName = hasFullName ? String(updateData.full_name).trim() : undefined;
+        const phoneNumber = hasPhoneNumber
+            ? String(updateData.phone_number ?? "").trim()
+            : undefined;
+        const gender = hasGender
+            ? String(updateData.gender ?? "").trim() || null
+            : undefined;
 
         // Tìm User
         let user = await User.findOne({ where: { id: userId } });
@@ -52,16 +70,24 @@ const updateProfileService = async (userId, updateData) => {
         }
 
         // Validate số điện thoại cơ bản nếu có truyền lên
-        if (phone_number) {
+        if (hasFullName && !fullName) {
+            return { EC: 400, EM: "Full name cannot be empty.", DT: "" };
+        }
+
+        if (hasGender && gender !== null && !["male", "female", "other"].includes(gender)) {
+            return { EC: 400, EM: "Gender must be male, female, or other.", DT: "" };
+        }
+
+        if (phoneNumber) {
             const phoneRegex = /^[0-9]+$/;
-            if (!phoneRegex.test(phone_number)) {
+            if (!phoneRegex.test(phoneNumber)) {
                 return { EC: 400, EM: "Phone number must contain only digits.", DT: "" };
             }
             
             // Check xem SĐT mới có bị trùng với người khác không (ngoại trừ chính mình)
             const existingPhone = await User.findOne({ 
                 where: { 
-                    phone_number: phone_number,
+                    phone_number: phoneNumber,
                     id: { [Op.ne]: userId } // id Not Equal userId
                 } 
             });
@@ -71,11 +97,12 @@ const updateProfileService = async (userId, updateData) => {
         }
 
         // Cập nhật dữ liệu
-        await user.update({
-            full_name: full_name || user.full_name,
-            phone_number: phone_number || user.phone_number,
-            gender: gender || user.gender
-        });
+        const allowedUpdates = {};
+        if (hasFullName) allowedUpdates.full_name = fullName;
+        if (hasPhoneNumber) allowedUpdates.phone_number = phoneNumber || null;
+        if (hasGender) allowedUpdates.gender = gender;
+
+        await user.update(allowedUpdates);
 
         // Lấy dữ liệu mới nhất (đã bỏ password) để trả về Frontend cập nhật Redux
         const updatedUser = await User.findOne({ 

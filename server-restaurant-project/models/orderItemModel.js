@@ -25,6 +25,14 @@ const OrderItem = sequelize.define(
       type: DataTypes.DECIMAL(10, 2),
       allowNull: false,
     },
+    prep_time_minutes: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      validate: {
+        min: 1,
+        max: 180,
+      },
+    },
   },
   {
     tableName: "order_items",

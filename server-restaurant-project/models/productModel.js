@@ -33,6 +33,15 @@ const Product = sequelize.define(
       type: DataTypes.STRING,
       allowNull: true,
     },
+    prep_time_minutes: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      defaultValue: 15,
+      validate: {
+        min: 1,
+        max: 180,
+      },
+    },
     stock_quantity: {
       type: DataTypes.INTEGER,
       defaultValue: 0,

@@ -1,149 +1,152 @@
-import { Product, Category, sequelize } from "../models/index.js";
 import { Op } from "sequelize";
+import {
+  CartItem,
+  Category,
+  OrderItem,
+  Product,
+  sequelize,
+} from "../models/index.js";
+import { removeManagedImageByUrl } from "./productImageService.js";
 
-const getProducts = async (options) => {
+const getProducts = async (options = {}) => {
   try {
-    const { category_id, search, sort, page, limit} = options;
-    let whereCondition = {}; 
+    const page = Math.max(Number.parseInt(options.page, 10) || 1, 1);
+    const limit = Math.min(
+      Math.max(Number.parseInt(options.limit, 10) || 9, 1),
+      100,
+    );
+    const whereCondition = {};
     let orderCondition = [["createdAt", "DESC"]];
-    let offset = (page - 1) * limit;
 
-    if (category_id && category_id !== "all") {
-      whereCondition.category_id = category_id;
+    if (options.category_id && options.category_id !== "all") {
+      whereCondition.category_id = options.category_id;
     }
 
-    if (search) {
-      const keyword = search.trim().toLowerCase();
+    const keyword = String(options.search || "").trim().toLowerCase();
+    if (keyword) {
       whereCondition.name = sequelize.where(
-        sequelize.fn('LOWER', sequelize.col('Product.name')), 
-        'LIKE',
-        `%${keyword}%`
-      )
+        sequelize.fn("LOWER", sequelize.col("Product.name")),
+        "LIKE",
+        `%${keyword}%`,
+      );
     }
 
-    if (sort === "price_asc") {
-      orderCondition = [["price", "ASC"]];
-    } else if (sort === "price_desc") {
-      orderCondition = [["price", "DESC"]];
-    }
+    if (options.sort === "price_asc") orderCondition = [["price", "ASC"]];
+    if (options.sort === "price_desc") orderCondition = [["price", "DESC"]];
 
     const { count, rows } = await Product.findAndCountAll({
       where: whereCondition,
-      order: orderCondition, 
-      limit: +limit,   
-      offset: +offset, 
+      order: orderCondition,
+      limit,
+      offset: (page - 1) * limit,
       include: [{ model: Category, attributes: ["name"] }],
-      attributes: { exclude: ["updatedAt"] }
+      attributes: { exclude: ["updatedAt"] },
     });
 
-    let totalPages = Math.ceil(count / limit);
-
     return {
-      EM: "Get products with pagination successfully.",
+      EM: "Get products successfully.",
       EC: 0,
       DT: {
         totalRows: count,
-        totalPages: totalPages,
-        products: rows
+        totalPages: Math.ceil(count / limit),
+        products: rows,
       },
     };
   } catch (error) {
-    console.log("Error in getProducts service: ", error);
-    return {
-      EM: "Something wrongs in service...",
-      EC: 500,
-      DT: []
-    };
+    console.log("Error in getProducts service:", error);
+    return { EM: "Unable to get products.", EC: 500, DT: [] };
   }
+};
+
+const findProductWithSameName = (name, excludedId = null) => {
+  const where = sequelize.where(
+    sequelize.fn("LOWER", sequelize.col("name")),
+    String(name).toLowerCase(),
+  );
+  return Product.findOne({
+    where: excludedId ? { [Op.and]: [where, { id: { [Op.ne]: excludedId } }] } : where,
+  });
 };
 
 const createProduct = async (productData) => {
   try {
-    const {
-      category_id,
-      name,
-      description,
-      price,
-      original_price,
-      image_url,
-      stock_quantity,
-      is_available,
-    } = productData;
-
-    let checkNameProduct = await Product.findOne({
-      where: { name: name },
-    });
-    if (checkNameProduct) {
-      return { EM: "Product name is already exists.", EC: 409, DT: [] };
+    if (await findProductWithSameName(productData.name)) {
+      return { EM: "Product name already exists.", EC: 409, DT: "" };
     }
 
-    let checkCategory = await Category.findOne({
-      where: { id: category_id },
-    });
-    if (!checkCategory) {
-      return { EM: "Category ID is not available.", EC: 404, DT: [] };
+    if (!(await Category.findByPk(productData.category_id))) {
+      return { EM: "Category was not found.", EC: 404, DT: "" };
     }
 
-    const newProduct = await Product.create({
-      category_id,
-      name,
-      description,
-      price,
-      original_price,
-      image_url,
-      stock_quantity,
-      is_available,
-    });
-
-    return { EM: "Create new product successfully.", EC: 0, DT: newProduct };
+    if (productData.stock_quantity === 0) productData.is_available = false;
+    const product = await Product.create(productData);
+    return { EM: "Product created successfully.", EC: 0, DT: product };
   } catch (error) {
-    console.log("Error in createProduct service: ", error);
-    return { EM: "Something wrongs in service...", EC: 500, DT: [] };
+    console.log("Error in createProduct service:", error);
+    return { EM: "Unable to create product.", EC: 500, DT: "" };
   }
 };
 
 const updateProduct = async (id, productData) => {
   try {
-    let product = await Product.findOne({ where: { id: id } });
-    if (!product) {
-      return { EM: "Product not found.", EC: 404, DT: "" };
+    const product = await Product.findByPk(id);
+    if (!product) return { EM: "Product not found.", EC: 404, DT: "" };
+
+    if (productData.name && await findProductWithSameName(productData.name, id)) {
+      return { EM: "Product name already exists.", EC: 409, DT: "" };
     }
 
-    if (productData.name && productData.name !== product.name) {
-      let checkName = await Product.findOne({ where: { name: productData.name } });
-      if (checkName) return { EM: "Product name already exists.", EC: 409, DT: "" };
+    if (productData.category_id && !(await Category.findByPk(productData.category_id))) {
+      return { EM: "Category was not found.", EC: 404, DT: "" };
     }
 
-    if (!productData.image_url) {
-      productData.image_url = product.image_url;
-    }
+    const nextStock = productData.stock_quantity ?? product.stock_quantity;
+    if (Number(nextStock) === 0) productData.is_available = false;
 
-    // Logic quan trọng: Nếu update stock <= 0, tự động ép is_available = false
-    if (productData.stock_quantity !== undefined) {
-      const newStock = parseInt(productData.stock_quantity);
-      if (newStock <= 0) {
-        productData.is_available = false;
-      }
-    }
+    const previousImageUrl = product.image_url;
+    const imageWasReplaced = Boolean(
+      productData.image_url && productData.image_url !== previousImageUrl,
+    );
 
     await product.update(productData);
-    return { EM: "Update product successfully.", EC: 0, DT: product };
+
+    if (imageWasReplaced && previousImageUrl) {
+      await removeManagedImageByUrl(previousImageUrl);
+    }
+
+    return { EM: "Product updated successfully.", EC: 0, DT: product };
   } catch (error) {
-    console.log("Error in updateProduct service: ", error);
-    return { EM: "Something wrongs in service...", EC: 500, DT: "" };
+    console.log("Error in updateProduct service:", error);
+    return { EM: "Unable to update product.", EC: 500, DT: "" };
   }
 };
 
 const deleteProduct = async (id) => {
   try {
-    let product = await Product.findOne({ where: { id: id } });
+    const product = await Product.findByPk(id);
     if (!product) return { EM: "Product not found.", EC: 404, DT: "" };
 
+    const [orderReferences, cartReferences] = await Promise.all([
+      OrderItem.count({ where: { product_id: id } }),
+      CartItem.count({ where: { product_id: id } }),
+    ]);
+
+    if (orderReferences > 0 || cartReferences > 0) {
+      return {
+        EM: "This product is in an order or cart. Mark it unavailable instead of deleting it.",
+        EC: 409,
+        DT: "",
+      };
+    }
+
+    const imageUrl = product.image_url;
     await product.destroy();
-    return { EM: "Delete product successfully.", EC: 0, DT: "" };
+    if (imageUrl) await removeManagedImageByUrl(imageUrl);
+
+    return { EM: "Product deleted successfully.", EC: 0, DT: { id } };
   } catch (error) {
-    console.log("Error in deleteProduct service: ", error);
-    return { EM: "Something wrongs in service...", EC: 500, DT: "" };
+    console.log("Error in deleteProduct service:", error);
+    return { EM: "Unable to delete product.", EC: 500, DT: "" };
   }
 };
 

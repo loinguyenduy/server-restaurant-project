@@ -5,6 +5,7 @@ import Category from "./categoryModel.js";
 import Product from "./productModel.js";
 import Order from "./orderModel.js";
 import OrderItem from "./orderItemModel.js";
+import OrderStatusHistory from "./orderStatusHistoryModel.js";
 import Cart from "./cartModel.js";
 import CartItem from "./cartItem.js";
 import Table from "./tableModel.js";
@@ -44,6 +45,21 @@ Reservation.belongsTo(Table, { foreignKey: "table_id" });
 Order.hasMany(OrderItem, { foreignKey: "order_id", onDelete: "CASCADE" });
 OrderItem.belongsTo(Order, { foreignKey: "order_id" });
 
+Order.hasMany(OrderStatusHistory, {
+  foreignKey: "order_id",
+  as: "StatusHistory",
+  onDelete: "CASCADE",
+});
+OrderStatusHistory.belongsTo(Order, { foreignKey: "order_id" });
+User.hasMany(OrderStatusHistory, {
+  foreignKey: "changed_by",
+  as: "OrderStatusChanges",
+});
+OrderStatusHistory.belongsTo(User, {
+  foreignKey: "changed_by",
+  as: "ChangedBy",
+});
+
 // 9. Product - OrderItem (1:N)
 Product.hasMany(OrderItem, { foreignKey: "product_id" });
 OrderItem.belongsTo(Product, { foreignKey: "product_id" });
@@ -68,6 +84,7 @@ export {
   Product,
   Order,
   OrderItem,
+  OrderStatusHistory,
   Cart,
   CartItem,
   Table,

@@ -1,8 +1,15 @@
 import { 
+    changePasswordService,
+    updateProfileService,
     getAllUsersService, 
     updateUserRoleService, 
     toggleUserStatusService 
 } from "../services/userService.js";
+
+const getResponseStatus = (result) => {
+    if (result.EC === 0) return 200;
+    return [400, 401, 403, 404, 409].includes(result.EC) ? result.EC : 500;
+};
 
 const handleChangePassword = async (req, res) => {
     try {
@@ -13,7 +20,7 @@ const handleChangePassword = async (req, res) => {
         // Bắt lỗi thiếu trường dữ liệu
         if (!oldPassword || !newPassword) {
             return res.status(400).json({
-                EC: 1,
+                EC: 400,
                 EM: "Missing required parameters.",
                 DT: ""
             });
@@ -22,14 +29,14 @@ const handleChangePassword = async (req, res) => {
         // Bắt lỗi mật khẩu quá ngắn
         if (newPassword.length < 6) {
             return res.status(400).json({
-                EC: 1,
+                EC: 400,
                 EM: "New password must be at least 6 characters long.",
                 DT: ""
             });
         }
 
         const result = await changePasswordService(userId, oldPassword, newPassword);
-        return res.status(200).json(result);
+        return res.status(getResponseStatus(result)).json(result);
 
     } catch (error) {
         console.log(">>> Error in handleChangePassword controller: ", error);
@@ -49,14 +56,14 @@ const handleUpdateProfile = async (req, res) => {
         // Bắt lỗi không gửi gì lên
         if (!updateData || Object.keys(updateData).length === 0) {
             return res.status(400).json({
-                EC: 1,
+                EC: 400,
                 EM: "No data provided to update.",
                 DT: ""
             });
         }
 
         const result = await updateProfileService(userId, updateData);
-        return res.status(200).json(result);
+        return res.status(getResponseStatus(result)).json(result);
 
     } catch (error) {
         console.log(">>> Error in handleUpdateProfile controller: ", error);

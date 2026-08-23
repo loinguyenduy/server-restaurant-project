@@ -1,20 +1,19 @@
 import { verifyToken } from "../services/jwtService.js";
+import { User } from "../models/index.js";
 
-//Get token from request (header or cookies)
+// Access tokens are sent through the Authorization header.
 const extractToken = (req) => {
   if (
     req.headers.authorization &&
     req.headers.authorization.split(" ")[0] === "Bearer"
   ) {
     return req.headers.authorization.split(" ")[1];
-  } else if (req.cookies && req.cookies.jwt) {
-    return req.cookies.jwt;
   }
   return null;
 };
 
 //Check valid of token
-const checkUserJWT = (req, res, next) => {
+const checkUserJWT = async (req, res, next) => {
   try {
     const token = extractToken(req);
 
@@ -29,7 +28,19 @@ const checkUserJWT = (req, res, next) => {
     const verification = verifyToken(token);
 
     if (verification.isValid) {
-      req.user = verification.decoded;
+      const user = await User.findByPk(verification.decoded.id, {
+        attributes: ["id", "email", "username", "role", "is_active"],
+      });
+
+      if (!user || !user.is_active) {
+        return res.status(401).json({
+          EM: "Your account is unavailable or has been locked.",
+          EC: 401,
+          DT: "",
+        });
+      }
+
+      req.user = user.get({ plain: true });
       next();
     } else {
       return res.status(401).json({

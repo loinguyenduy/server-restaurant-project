@@ -1,10 +1,7 @@
 import express from "express";
-import { handleCreatePayment, handlePayOSWebhook } from "../controllers/payosController.js";
-import { checkUserJWT } from "../middleware/jwtAction.js";
+import { handlePayOSWebhook } from "../controllers/payosController.js";
 
 const router = express.Router();
-
-router.post("/payment/create-link", checkUserJWT, handleCreatePayment);
 
 router.post("/payment/webhook", handlePayOSWebhook);
 

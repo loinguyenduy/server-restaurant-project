@@ -25,6 +25,18 @@ const Order = sequelize.define(
       type: DataTypes.ENUM("online", "offline"),
       allowNull: false,
     },
+    fulfillment_type: {
+      type: DataTypes.ENUM("takeaway", "dine_in"),
+      allowNull: true,
+    },
+    source: {
+      type: DataTypes.ENUM("customer_web", "pos"),
+      allowNull: true,
+    },
+    contact_name: {
+      type: DataTypes.STRING(100),
+      allowNull: true,
+    },
     total_amount: {
       type: DataTypes.DECIMAL(10, 2),
       allowNull: false,
@@ -46,7 +58,7 @@ const Order = sequelize.define(
       allowNull: false,
     },
     payment_status: {
-      type: DataTypes.ENUM("pending", "paid", "failed"),
+      type: DataTypes.ENUM("pending", "paid", "failed", "refunded"),
       defaultValue: "pending",
     },
     payment_method: {
@@ -70,8 +82,21 @@ const Order = sequelize.define(
       allowNull: true,
     },
     order_status: {
-      type: DataTypes.ENUM("pending", "processing", "completed", "cancelled"),
+      type: DataTypes.ENUM(
+        "pending",
+        "processing",
+        "pending_payment",
+        "confirmed",
+        "preparing",
+        "ready",
+        "completed",
+        "cancelled",
+      ),
       defaultValue: "pending",
+    },
+    estimated_ready_at: {
+      type: DataTypes.DATE,
+      allowNull: true,
     },
   },
   {

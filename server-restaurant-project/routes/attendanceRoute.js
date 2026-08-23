@@ -10,6 +10,6 @@ router.post("/attendance/check-in", checkUserJWT, checkUserPermission(["admin", 
 router.put("/attendance/check-out", checkUserJWT, checkUserPermission(["admin", "staff"]), handleCheckOut);
 
 // Route xem danh sách
-router.get("/manage/attendance/logs", checkUserJWT, checkUserPermission(["admin", "staff"]), handleGetAttendanceLogs);
+router.get("/manage/attendance/logs", checkUserJWT, checkUserPermission(["admin"]), handleGetAttendanceLogs);
 
 export default router;
