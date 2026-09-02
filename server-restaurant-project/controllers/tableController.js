@@ -1,4 +1,4 @@
-import { createTableService, deleteTableService, getAllTablesService, updateTableService, updateTableStatusService } from "../services/tableService.js";
+import { createTableService, deleteTableService, getAllTablesService, getPosTablesService, updateTableService, updateTableStatusService } from "../services/tableService.js";
 import { emitToOperations } from "../socket/socket.js";
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -17,6 +17,11 @@ const normalizeTable = (body = {}) => {
 const handleGetAllTables = async (req, res) => {
   try { return send(res, await getAllTablesService()); }
   catch (error) { console.error("Error in table list controller:", error); return res.status(500).json({ EC: 500, EM: "Server error.", DT: [] }); }
+};
+
+const handleGetPosTables = async (req, res) => {
+  try { return send(res, await getPosTablesService()); }
+  catch (error) { console.error("Error in POS table overview controller:", error); return res.status(500).json({ EC: 500, EM: "Server error.", DT: [] }); }
 };
 
 const handleCreateTable = async (req, res) => {
@@ -59,4 +64,4 @@ const handleDeleteTable = async (req, res) => {
   } catch (error) { console.error("Error in delete table controller:", error); return res.status(500).json({ EC: 500, EM: "Server error.", DT: "" }); }
 };
 
-export { handleCreateTable, handleDeleteTable, handleGetAllTables, handleUpdateTable, handleUpdateTableStatus };
+export { handleCreateTable, handleDeleteTable, handleGetAllTables, handleGetPosTables, handleUpdateTable, handleUpdateTableStatus };

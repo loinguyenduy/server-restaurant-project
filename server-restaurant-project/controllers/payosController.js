@@ -11,7 +11,8 @@ const handlePayOSWebhook = async (req, res) => {
       return res.status(status).json({ success: false, message: result.EM });
     }
     const order = result.DT?.order;
-    if (order) {
+    if (order && (result.DT.transitioned || result.DT.requires_manual_refund)) {
+      const changedAt = new Date().toISOString();
       const paymentPayload = { orderId: order.id, paymentStatus: order.payment_status, changedAt: new Date().toISOString() };
       emitToUser(order.user_id, "payment:status_changed", paymentPayload);
       emitToOperations("payment:status_changed", paymentPayload);
@@ -19,7 +20,16 @@ const handlePayOSWebhook = async (req, res) => {
         const statusPayload = { orderId: order.id, newStatus: order.order_status, changedAt: new Date().toISOString() };
         emitToUser(order.user_id, "order:status_changed", statusPayload);
         emitToKitchen("order:status_changed", statusPayload);
-        emitToKitchen("order:new", { orderId: order.id, confirmedAt: new Date().toISOString() });
+        emitToOperations("order:status_changed", statusPayload);
+        if (order.fulfillment_type !== "dine_in") emitToKitchen("order:new", { orderId: order.id, confirmedAt: changedAt });
+      }
+      if (result.DT.tableChange) {
+        emitToOperations("table:status_changed", { ...result.DT.tableChange, changedAt });
+      }
+      if (result.DT.reservationChange) {
+        const reservationPayload = { reservationId: result.DT.reservationChange.reservationId, status: result.DT.reservationChange.status, changedAt };
+        emitToUser(result.DT.reservationChange.userId, "reservation:status_changed", reservationPayload);
+        emitToOperations("reservation:status_changed", reservationPayload);
       }
     }
     return res.status(200).json({ success: true, message: result.EM });

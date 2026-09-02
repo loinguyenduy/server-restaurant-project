@@ -1,7 +1,6 @@
 import {
   cancelPendingCustomerOrderService,
   createOrderAndPaymentService,
-  createPosOrderService,
   getAllOrdersService,
   getKitchenOrdersService,
   getManagedOrderDetailsService,
@@ -10,6 +9,7 @@ import {
   reCreatePaymentLinkService,
   updateOrderStatusService,
 } from "../services/orderService.js";
+import { addDineInItemsService, checkoutDineInOrderService, createDineInOrderService } from "../services/dineInOrderService.js";
 import {
   emitProductAvailability,
   emitToKitchen,
@@ -42,6 +42,7 @@ const emitOrderStatus = (order) => {
   const payload = { orderId: order.id, newStatus: order.order_status, changedAt: new Date().toISOString() };
   emitToUser(order.user_id, "order:status_changed", payload);
   emitToKitchen("order:status_changed", payload);
+  emitToOperations("order:status_changed", payload);
 };
 
 const normalizeCheckout = (body = {}) => {
@@ -197,13 +198,13 @@ const handleUpdateOrderStatus = async (req, res) => {
 
 const handleCreatePosOrder = async (req, res) => {
   try {
-    const result = await createPosOrderService(req.user.id, req.body);
+    const result = await createDineInOrderService(req.user.id, req.body);
     if (result.EC === 0) {
       emitProductChanges(result.DT.productChanges);
       emitTableChange(result.DT.tableChange);
-      if (result.DT.order.order_status === "confirmed") {
-        emitToKitchen("order:new", { orderId: result.DT.order.id, confirmedAt: new Date().toISOString() });
-      }
+      const payload = { orderId: result.DT.order.id, confirmedAt: new Date().toISOString() };
+      emitToKitchen("order:new", payload);
+      emitToOperations("order:new", payload);
     }
     return sendResult(res, result, 201);
   } catch (error) {
@@ -212,8 +213,55 @@ const handleCreatePosOrder = async (req, res) => {
   }
 };
 
+const handleAddDineInItems = async (req, res) => {
+  try {
+    if (!uuidPattern.test(req.params.id || "")) return res.status(400).json({ EC: 400, EM: "A valid order ID is required.", DT: "" });
+    const result = await addDineInItemsService(req.user.id, req.params.id, req.body);
+    if (result.EC === 0) {
+      emitProductChanges(result.DT.productChanges);
+      const payload = { orderId: result.DT.order.id, addedItemCount: result.DT.addedItemCount, changedAt: new Date().toISOString() };
+      emitToKitchen("order:items_added", payload);
+      emitToOperations("order:items_added", payload);
+      if (result.DT.statusChanged) emitOrderStatus(result.DT.order);
+    }
+    return sendResult(res, result);
+  } catch (error) {
+    console.error("Error in add dine-in items controller:", error);
+    return res.status(500).json({ EC: 500, EM: "Server error.", DT: "" });
+  }
+};
+
+const handleCheckoutDineInOrder = async (req, res) => {
+  try {
+    if (!uuidPattern.test(req.params.id || "")) return res.status(400).json({ EC: 400, EM: "A valid order ID is required.", DT: "" });
+    const paymentMethod = String(req.body?.payment_method || "").trim().toLowerCase();
+    if (!["cash", "payos"].includes(paymentMethod)) return res.status(400).json({ EC: 400, EM: "Payment method must be cash or PayOS.", DT: "" });
+    const result = await checkoutDineInOrderService(req.user.id, req.params.id, paymentMethod);
+    if (result.EC === 0) {
+      const changedAt = new Date().toISOString();
+      const order = result.DT.order;
+      const paymentPayload = { orderId: order.id, paymentStatus: order.payment_status, changedAt };
+      emitToUser(order.user_id, "payment:status_changed", paymentPayload);
+      emitToOperations("payment:status_changed", paymentPayload);
+      emitTableChange(result.DT.tableChange);
+      if (order.order_status === "completed") emitOrderStatus(order);
+      if (result.DT.reservationChange) {
+        const reservationPayload = { reservationId: result.DT.reservationChange.reservationId, status: result.DT.reservationChange.status, changedAt };
+        emitToUser(result.DT.reservationChange.userId, "reservation:status_changed", reservationPayload);
+        emitToOperations("reservation:status_changed", reservationPayload);
+      }
+    }
+    return sendResult(res, result);
+  } catch (error) {
+    console.error("Error in dine-in checkout controller:", error);
+    return res.status(500).json({ EC: 500, EM: "Server error.", DT: "" });
+  }
+};
+
 export {
+  handleAddDineInItems,
   handleCancelCustomerOrder,
+  handleCheckoutDineInOrder,
   handleCheckout,
   handleCreatePosOrder,
   handleGetAllOrders,

@@ -1,7 +1,8 @@
 import express from "express";
 import { 
     handleCheckAvailability, handleCreateReservation, handleGetUserReservations, handleCancelReservation,
-    handleGetAllReservations, handleGetManagedReservationDetails, handleUpdateReservationStatus
+    handleAssignReservationTable, handleGetAllReservations, handleGetManagedReservationDetails,
+    handleGetSuitableTables, handleSeatReservation, handleUpdateReservationStatus
 } from "../controllers/reservationController.js";
 import { checkUserJWT, checkUserPermission } from "../middleware/jwtAction.js";
 
@@ -17,6 +18,9 @@ router.put("/reservations/cancel/:id", checkUserJWT, customerOnly, handleCancelR
 // Route của Admin & Staff
 router.get("/manage/reservations", checkUserJWT, checkUserPermission(["admin", "staff"]), handleGetAllReservations);
 router.get("/manage/reservations/:id", checkUserJWT, checkUserPermission(["admin", "staff"]), handleGetManagedReservationDetails);
+router.get("/manage/reservations/:id/suitable-tables", checkUserJWT, checkUserPermission(["admin", "staff"]), handleGetSuitableTables);
+router.put("/manage/reservations/:id/table", checkUserJWT, checkUserPermission(["admin", "staff"]), handleAssignReservationTable);
+router.post("/manage/reservations/:id/seat", checkUserJWT, checkUserPermission(["admin", "staff"]), handleSeatReservation);
 router.put("/manage/reservations/:id/status", checkUserJWT, checkUserPermission(["admin", "staff"]), handleUpdateReservationStatus);
 
 export default router;

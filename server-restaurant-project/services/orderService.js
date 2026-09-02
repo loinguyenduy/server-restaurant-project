@@ -7,11 +7,15 @@ import {
   OrderItem,
   OrderStatusHistory,
   Product,
+  Reservation,
+  Review,
   Table,
   User,
 } from "../models/index.js";
 import { sequelize } from "../config/databaseConfig.js";
 import { getCartData } from "./cartService.js";
+import { cancelDineInOrderService, processDineInPayOSWebhookService } from "./dineInOrderService.js";
+import { applyStockChange } from "./stockMovementService.js";
 
 const ORDER_ITEM_INCLUDE = {
   model: OrderItem,
@@ -24,6 +28,7 @@ const ORDER_ITEM_INCLUDE = {
 const ORDER_DETAIL_INCLUDE = [
   ORDER_ITEM_INCLUDE,
   { model: Table, attributes: ["table_number"] },
+  { model: Reservation, attributes: ["id", "reservation_time", "number_of_people", "contact_name", "status"] },
   {
     model: OrderStatusHistory,
     as: "StatusHistory",
@@ -31,6 +36,39 @@ const ORDER_DETAIL_INCLUDE = [
     order: [["createdAt", "ASC"]],
   },
 ];
+
+const OWN_REVIEW_ATTRIBUTES = ["id", "rating", "comment", "status", "createdAt", "updatedAt"];
+
+const getCustomerOrderInclude = (userId, includeHistory = false) => [
+  ORDER_ITEM_INCLUDE,
+  ...(includeHistory ? [
+    { model: Table, attributes: ["table_number"] },
+    { model: Reservation, attributes: ["id", "reservation_time", "number_of_people", "contact_name", "status"] },
+    {
+      model: OrderStatusHistory,
+      as: "StatusHistory",
+      separate: true,
+      order: [["createdAt", "ASC"]],
+    },
+  ] : [
+    { model: Reservation, attributes: ["id", "reservation_time", "number_of_people", "contact_name", "status"] },
+  ]),
+  { model: Review, attributes: OWN_REVIEW_ATTRIBUTES, where: { user_id: userId }, required: false },
+];
+
+const getCustomerOrderOwnershipWhere = (userId) => ({
+  [Op.or]: [
+    // Order.user_id is the customer owner for direct web orders, but the POS operator for POS orders.
+    { user_id: userId },
+    {
+      "$Reservation.user_id$": userId,
+      reservation_id: { [Op.ne]: null },
+      fulfillment_type: "dine_in",
+      source: "pos",
+      order_status: "completed",
+    },
+  ],
+});
 
 const LEGACY_PENDING_STATUSES = ["pending", "pending_payment"];
 const ORDER_STATUSES = ["pending", "processing", "pending_payment", "confirmed", "preparing", "ready", "completed", "cancelled"];
@@ -114,8 +152,11 @@ const calculateReadyAt = (items, confirmedAt = new Date()) => {
 const serializeOrder = (order) => {
   if (!order) return order;
   const plain = typeof order.get === "function" ? order.get({ plain: true }) : { ...order };
+  const ownReview = plain.Review;
+  delete plain.Review;
   return {
     ...plain,
+    ...(ownReview !== undefined ? { review: ownReview || null } : {}),
     total_amount: Number(plain.total_amount),
     discount_amount: Number(plain.discount_amount || 0),
     shipping_fee: Number(plain.shipping_fee || 0),
@@ -141,6 +182,7 @@ const loadManagedOrderDetails = async (orderId) => {
     include: [
       ORDER_ITEM_INCLUDE,
       { model: Table, attributes: ["id", "table_number", "capacity"] },
+      { model: Reservation, attributes: ["id", "reservation_time", "number_of_people", "contact_name", "status"] },
       { model: User, attributes: ["id", "username", "full_name", "email", "phone_number"] },
       {
         model: OrderStatusHistory,
@@ -211,6 +253,7 @@ const createOrderAndPaymentService = async (userId, checkoutData) => {
       subtotal += lineTotal;
       orderItems.push({
         product_id: product.id,
+        product_name: product.name,
         quantity: cartItem.quantity,
         price: unitPrice,
         prep_time_minutes: Number(product.prep_time_minutes) || 15,
@@ -252,14 +295,22 @@ const createOrderAndPaymentService = async (userId, checkoutData) => {
     await OrderItem.bulkCreate(orderItems.map((item) => ({
       order_id: newOrder.id,
       product_id: item.product_id,
+      product_name: item.product_name,
       quantity: item.quantity,
       price: item.price,
       prep_time_minutes: item.prep_time_minutes,
     })), { transaction });
     for (const item of orderItems) {
-      await item.Product.update({
-        stock_quantity: item.Product.stock_quantity - item.quantity,
-      }, { transaction });
+      await applyStockChange({
+        product: item.Product,
+        quantityChange: -item.quantity,
+        type: "SALE",
+        referenceType: "ORDER",
+        referenceId: newOrder.id,
+        note: "Customer takeaway order created.",
+        actorId: userId,
+        transaction,
+      });
     }
     await OrderStatusHistory.create({
       order_id: newOrder.id,
@@ -307,9 +358,9 @@ const createOrderAndPaymentService = async (userId, checkoutData) => {
 const getUserOrdersService = async (userId) => {
   try {
     const orders = await Order.findAll({
-      where: { user_id: userId },
+      where: getCustomerOrderOwnershipWhere(userId),
       order: [["createdAt", "DESC"]],
-      include: [ORDER_ITEM_INCLUDE],
+      include: getCustomerOrderInclude(userId),
     });
     return makeResult(0, "Orders retrieved successfully.", orders.map(serializeOrder));
   } catch (error) {
@@ -320,7 +371,10 @@ const getUserOrdersService = async (userId) => {
 
 const getUserOrderDetailsService = async (userId, orderId) => {
   try {
-    const order = await loadOrderDetails(orderId, { user_id: userId });
+    const order = serializeOrder(await Order.findOne({
+      where: { id: orderId, ...getCustomerOrderOwnershipWhere(userId) },
+      include: getCustomerOrderInclude(userId, true),
+    }));
     return order ? makeResult(0, "Order retrieved successfully.", order) : makeResult(404, "Order not found.");
   } catch (error) {
     console.error("Error while retrieving customer order details:", error);
@@ -349,7 +403,13 @@ const reCreatePaymentLinkService = async (userId, orderId) => {
 const processPayOSWebhookService = async (verifiedData) => {
   const orderCode = String(verifiedData.orderCode || "");
   const order = await Order.findOne({ where: { transaction_id: orderCode } });
+  if (!order && String(verifiedData.code || "") !== "00") {
+    return makeResult(0, "Non-success PayOS webhook acknowledged.", { orderId: null, transitioned: false });
+  }
   if (!order) return makeResult(404, "Order not found for this payment.");
+  if (order.fulfillment_type === "dine_in" && order.source === "pos") {
+    return processDineInPayOSWebhookService(verifiedData, order);
+  }
   if (order.payment_method !== "payos") return makeResult(409, "The payment method does not match this order.");
   if (Number(verifiedData.amount) !== Number(order.final_amount)) {
     return makeResult(409, "The paid amount does not match the order total.");
@@ -432,7 +492,16 @@ const restoreStockAndCancel = async ({ orderId, userId = null, customerOnly = fa
       quantities.set(item.product_id, (quantities.get(item.product_id) || 0) + item.quantity);
     }
     for (const product of products) {
-      await product.update({ stock_quantity: product.stock_quantity + (quantities.get(product.id) || 0) }, { transaction });
+      await applyStockChange({
+        product,
+        quantityChange: quantities.get(product.id) || 0,
+        type: "ORDER_CANCELLATION",
+        referenceType: "ORDER",
+        referenceId: order.id,
+        note,
+        actorId: userId,
+        transaction,
+      });
     }
     const fromStatus = order.order_status;
     await order.update({ order_status: "cancelled", payment_status: "failed" }, { transaction });
@@ -574,6 +643,13 @@ const getKitchenOrdersService = async () => {
 };
 
 const updateOrderStatusService = async (orderId, newStatus, actor) => {
+  const lifecycleSnapshot = await Order.findByPk(orderId, { attributes: ["id", "fulfillment_type", "source"] });
+  if (!lifecycleSnapshot) return makeResult(404, "Order not found.");
+  const isExplicitDineIn = lifecycleSnapshot.fulfillment_type === "dine_in" && lifecycleSnapshot.source === "pos";
+  if (isExplicitDineIn && newStatus === "cancelled") return cancelDineInOrderService(actor?.id || null, orderId);
+  if (isExplicitDineIn && newStatus === "completed") {
+    return makeResult(409, "Dine-in orders can only be completed through Checkout Table.");
+  }
   const transaction = await sequelize.transaction();
   try {
     const order = await Order.findByPk(orderId, {
@@ -614,8 +690,17 @@ const updateOrderStatusService = async (orderId, newStatus, actor) => {
         quantities.set(item.product_id, (quantities.get(item.product_id) || 0) + item.quantity);
       }
       for (const product of products) {
-        const nextStock = product.stock_quantity + (quantities.get(product.id) || 0);
-        await product.update({ stock_quantity: nextStock }, { transaction });
+        const quantityChange = quantities.get(product.id) || 0;
+        const { stockAfter: nextStock } = await applyStockChange({
+          product,
+          quantityChange,
+          type: "ORDER_CANCELLATION",
+          referenceType: "ORDER",
+          referenceId: order.id,
+          note: "Order cancelled by restaurant staff.",
+          actorId: actor?.id || null,
+          transaction,
+        });
         productChanges.push({
           productId: product.id,
           stock_quantity: nextStock,
@@ -668,128 +753,9 @@ const updateOrderStatusService = async (orderId, newStatus, actor) => {
   }
 };
 
-const createPosOrderService = async (staffId, posData) => {
-  const transaction = await sequelize.transaction();
-  try {
-    const items = Array.isArray(posData.items) ? posData.items : [];
-    if (items.length === 0) {
-      await transaction.rollback();
-      return makeResult(400, "No items in the order.");
-    }
-    const productIds = [...new Set(items.map((item) => item.product_id))].sort();
-    const products = await Product.findAll({
-      where: { id: { [Op.in]: productIds } },
-      order: [["id", "ASC"]],
-      transaction,
-      lock: transaction.LOCK.UPDATE,
-    });
-    const byId = new Map(products.map((product) => [product.id, product]));
-    let subtotal = 0;
-    const snapshots = [];
-    for (const item of items) {
-      const product = byId.get(item.product_id);
-      if (!product || !product.is_available || product.stock_quantity <= 0) {
-        await transaction.rollback();
-        return makeResult(409, "A selected product is unavailable.");
-      }
-      if (!Number.isSafeInteger(item.quantity) || item.quantity <= 0 || item.quantity > product.stock_quantity) {
-        await transaction.rollback();
-        return makeResult(409, `Invalid quantity for ${product.name}.`);
-      }
-      const price = Number(product.price);
-      if (!Number.isSafeInteger(price) || price <= 0) {
-        await transaction.rollback();
-        return makeResult(409, `${product.name} does not have a valid VND integer price.`);
-      }
-      subtotal += price * item.quantity;
-      snapshots.push({ product, product_id: product.id, quantity: item.quantity, price, prep_time_minutes: Number(product.prep_time_minutes) || 15 });
-    }
-    const tax = Math.round(subtotal * 0.08);
-    if (!posData.table_id) {
-      await transaction.rollback();
-      return makeResult(400, "A table is required for a POS order.");
-    }
-    const table = await Table.findByPk(posData.table_id, { transaction, lock: transaction.LOCK.UPDATE });
-    if (!table) {
-      await transaction.rollback();
-      return makeResult(404, "The selected table no longer exists.");
-    }
-    if (table.status !== "available") {
-      await transaction.rollback();
-      return makeResult(409, "The selected table is no longer available.");
-    }
-    const method = posData.payment_method === "payos" ? "payos" : "cash";
-    const status = method === "payos" ? "pending_payment" : "confirmed";
-    const orderCode = method === "payos" ? createPayOSOrderCode() : null;
-    const order = await Order.create({
-      user_id: staffId,
-      table_id: table.id,
-      type: "offline",
-      fulfillment_type: "dine_in",
-      source: "pos",
-      total_amount: subtotal,
-      shipping_fee: 0,
-      tax_price: tax,
-      final_amount: subtotal + tax,
-      payment_method: method,
-      payment_status: "pending",
-      transaction_id: orderCode ? String(orderCode) : null,
-      order_status: status,
-      note: String(posData.note || "").trim() || null,
-      estimated_ready_at: method === "cash" ? calculateReadyAt(snapshots) : null,
-    }, { transaction });
-    await OrderItem.bulkCreate(snapshots.map((item) => ({
-      order_id: order.id,
-      product_id: item.product_id,
-      quantity: item.quantity,
-      price: item.price,
-      prep_time_minutes: item.prep_time_minutes,
-    })), { transaction });
-    for (const item of snapshots) {
-      await item.product.update({ stock_quantity: item.product.stock_quantity - item.quantity }, { transaction });
-    }
-    await OrderStatusHistory.create({
-      order_id: order.id,
-      from_status: null,
-      to_status: status,
-      changed_by: staffId,
-      note: "POS order created.",
-    }, { transaction });
-    await table.update({ status: "occupied" }, { transaction });
-    await transaction.commit();
-
-    let checkoutUrl = null;
-    let paymentLinkAvailable = method === "cash";
-    if (method === "payos") {
-      try {
-        checkoutUrl = await createPayOSLink(order, orderCode);
-        paymentLinkAvailable = true;
-      } catch (error) {
-        console.error("Unable to create the PayOS link for the POS order:", error.message);
-      }
-    }
-    return makeResult(0, "POS order created successfully.", {
-      order: await loadOrderDetails(order.id),
-      checkoutUrl,
-      paymentLinkAvailable,
-      tableChange: { tableId: table.id, status: "occupied", changeType: "pos_order_created" },
-      productChanges: snapshots.map((item) => ({
-        productId: item.product.id,
-        stock_quantity: item.product.stock_quantity,
-        is_available: item.product.is_available,
-      })),
-    });
-  } catch (error) {
-    await rollbackIfNeeded(transaction);
-    console.error("Error while creating a POS order:", error);
-    return makeResult(500, "Unable to create the POS order.");
-  }
-};
-
 export {
   cancelPendingCustomerOrderService,
   createOrderAndPaymentService,
-  createPosOrderService,
   expirePendingOrderService,
   getAllOrdersService,
   getManagedOrderDetailsService,

@@ -17,6 +17,24 @@ const Order = sequelize.define(
       type: DataTypes.UUID,
       allowNull: true,
     },
+    reservation_id: {
+      type: DataTypes.UUID,
+      allowNull: true,
+      references: {
+        model: "reservations",
+        key: "id",
+      },
+      onDelete: "SET NULL",
+      onUpdate: "CASCADE",
+    },
+    guest_count: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      validate: {
+        min: 1,
+        max: 50,
+      },
+    },
     user_coupon_id: {
       type: DataTypes.BIGINT,
       allowNull: true,
@@ -63,7 +81,7 @@ const Order = sequelize.define(
     },
     payment_method: {
       type: DataTypes.ENUM("cash", "card", "payos"),
-      defaultValue: "cash",
+      allowNull: true,
     },
     transaction_id: {
       type: DataTypes.STRING,

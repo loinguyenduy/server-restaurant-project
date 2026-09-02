@@ -1,45 +1,10 @@
-import { checkCurrentStatusService, checkInService, checkOutService, getAttendanceLogService } from "../services/attendanceService.js";
-
-const handleCheckStatus = async (req, res) => {
-    try {
-        let data = await checkCurrentStatusService(req.user.id);
-        return res.status(200).json(data);
-    } catch (error) {
-        return res.status(500).json({ EM: "Server Error", EC: 500 });
-    }
-};
-
-const handleCheckIn = async (req, res) => {
-    try {
-        let data = await checkInService(req.user.id);
-        return res.status(200).json(data);
-    } catch (error) {
-        return res.status(500).json({ EM: "Server Error", EC: 500 });
-    }
-};
-
-const handleCheckOut = async (req, res) => {
-    try {
-        let data = await checkOutService(req.user.id);
-        return res.status(200).json(data);
-    } catch (error) {
-        return res.status(500).json({ EM: "Server Error", EC: 500 });
-    }
-};
-
-const handleGetAttendanceLogs = async (req, res) => {
-    try {
-        const userId = req.user.role === 'staff' ? req.user.id : (req.query.userId || null);
-        const options = {
-            page: req.query.page || 1,
-            limit: req.query.limit || 20,
-            userId: userId
-        };
-        let data = await getAttendanceLogService(options);
-        return res.status(200).json(data);
-    } catch (error) {
-        return res.status(500).json({ EM: "Server Error", EC: 500 });
-    }
-};
-
-export { handleCheckStatus, handleCheckIn, handleCheckOut, handleGetAttendanceLogs };
+import { checkCurrentStatusService, checkInService, checkOutService, getAttendanceLogService, getAttendanceSummaryService, getOwnAttendanceHistoryService } from "../services/attendanceService.js";
+const statusFor = (result) => result.EC === 0 ? 200 : [400, 403, 404, 409].includes(result.EC) ? result.EC : 500;
+const send = (res, result) => res.status(statusFor(result)).json(result);
+const handleCheckStatus = async (req, res) => send(res, await checkCurrentStatusService(req.user.id));
+const handleCheckIn = async (req, res) => send(res, await checkInService(req.user.id));
+const handleCheckOut = async (req, res) => send(res, await checkOutService(req.user.id));
+const handleGetOwnAttendanceHistory = async (req, res) => send(res, await getOwnAttendanceHistoryService(req.user.id, req.query));
+const handleGetAttendanceLogs = async (req, res) => send(res, await getAttendanceLogService(req.query));
+const handleGetAttendanceSummary = async (req, res) => send(res, await getAttendanceSummaryService(req.query));
+export { handleCheckStatus, handleCheckIn, handleCheckOut, handleGetAttendanceLogs, handleGetAttendanceSummary, handleGetOwnAttendanceHistory };

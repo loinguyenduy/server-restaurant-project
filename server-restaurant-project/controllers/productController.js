@@ -49,7 +49,10 @@ const normalizeProductPayload = (body, isUpdate = false) => {
     data.original_price = null;
   }
 
-  if (!isUpdate || has("stock_quantity")) {
+  if (isUpdate && has("stock_quantity")) {
+    return { error: "Use Inventory to change product stock." };
+  }
+  if (!isUpdate) {
     data.stock_quantity = Number(body.stock_quantity);
     if (!Number.isInteger(data.stock_quantity) || data.stock_quantity < 0) {
       return { error: "Stock quantity must be a non-negative integer." };
@@ -127,7 +130,7 @@ const createNewProduct = async (req, res) => {
     const data = await createProduct({
       ...normalized.data,
       image_url: req.file?.path || null,
-    });
+    }, req.user.id);
 
     if (data.EC !== 0) await cleanupNewUpload(req.file);
     if (data.EC === 0) {

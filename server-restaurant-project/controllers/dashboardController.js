@@ -1,4 +1,4 @@
-import { getDashboardStatsService } from "../services/dashboardService.js";
+import { getAnalyticsOverviewService, getDashboardStatsService } from "../services/dashboardService.js";
 
 const handleGetDashboardStats = async (req, res) => {
     try {
@@ -11,3 +11,10 @@ const handleGetDashboardStats = async (req, res) => {
 };
 
 export { handleGetDashboardStats };
+const handleGetAnalyticsOverview = async (req, res) => {
+    const result = await getAnalyticsOverviewService(req.query);
+    const status = result.EC === 0 ? 200 : result.EC === 400 ? 400 : 500;
+    return res.status(status).json(result);
+};
+
+export { handleGetAnalyticsOverview };

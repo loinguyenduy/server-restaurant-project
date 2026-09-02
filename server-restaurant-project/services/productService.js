@@ -7,6 +7,7 @@ import {
   sequelize,
 } from "../models/index.js";
 import { removeManagedImageByUrl } from "./productImageService.js";
+import { applyStockChange } from "./stockMovementService.js";
 
 const getProducts = async (options = {}) => {
   try {
@@ -68,20 +69,28 @@ const findProductWithSameName = (name, excludedId = null) => {
   });
 };
 
-const createProduct = async (productData) => {
+const createProduct = async (productData, actorId) => {
+  const transaction = await sequelize.transaction();
   try {
     if (await findProductWithSameName(productData.name)) {
+      await transaction.rollback();
       return { EM: "Product name already exists.", EC: 409, DT: "" };
     }
 
     if (!(await Category.findByPk(productData.category_id))) {
+      await transaction.rollback();
       return { EM: "Category was not found.", EC: 404, DT: "" };
     }
 
-    if (productData.stock_quantity === 0) productData.is_available = false;
-    const product = await Product.create(productData);
+    const initialStock = Number(productData.stock_quantity || 0);
+    const product = await Product.create({ ...productData, stock_quantity: 0 }, { transaction });
+    if (initialStock > 0) {
+      await applyStockChange({ product, quantityChange: initialStock, type: "RESTOCK", referenceType: "PRODUCT", referenceId: product.id, note: "Initial stock recorded when the product was created.", actorId, transaction });
+    }
+    await transaction.commit();
     return { EM: "Product created successfully.", EC: 0, DT: product };
   } catch (error) {
+    if (!transaction.finished) await transaction.rollback();
     console.log("Error in createProduct service:", error);
     return { EM: "Unable to create product.", EC: 500, DT: "" };
   }
@@ -89,6 +98,9 @@ const createProduct = async (productData) => {
 
 const updateProduct = async (id, productData) => {
   try {
+    if (Object.prototype.hasOwnProperty.call(productData, "stock_quantity")) {
+      return { EM: "Use Inventory to change product stock.", EC: 400, DT: "" };
+    }
     const product = await Product.findByPk(id);
     if (!product) return { EM: "Product not found.", EC: 404, DT: "" };
 
@@ -99,9 +111,6 @@ const updateProduct = async (id, productData) => {
     if (productData.category_id && !(await Category.findByPk(productData.category_id))) {
       return { EM: "Category was not found.", EC: 404, DT: "" };
     }
-
-    const nextStock = productData.stock_quantity ?? product.stock_quantity;
-    if (Number(nextStock) === 0) productData.is_available = false;
 
     const previousImageUrl = product.image_url;
     const imageWasReplaced = Boolean(

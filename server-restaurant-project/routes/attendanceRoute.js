@@ -1,15 +1,13 @@
 import express from "express";
-import { handleCheckStatus, handleCheckIn, handleCheckOut, handleGetAttendanceLogs } from "../controllers/attendanceController.js";
+import { handleCheckStatus, handleCheckIn, handleCheckOut, handleGetAttendanceLogs, handleGetAttendanceSummary, handleGetOwnAttendanceHistory } from "../controllers/attendanceController.js";
 import { checkUserJWT, checkUserPermission } from "../middleware/jwtAction.js";
-
 const router = express.Router();
-
-// Route cho Staff tự thao tác
-router.get("/attendance/status", checkUserJWT, checkUserPermission(["admin", "staff"]), handleCheckStatus);
-router.post("/attendance/check-in", checkUserJWT, checkUserPermission(["admin", "staff"]), handleCheckIn);
-router.put("/attendance/check-out", checkUserJWT, checkUserPermission(["admin", "staff"]), handleCheckOut);
-
-// Route xem danh sách
-router.get("/manage/attendance/logs", checkUserJWT, checkUserPermission(["admin"]), handleGetAttendanceLogs);
-
+const staffOnly = [checkUserJWT, checkUserPermission(["staff"])];
+const adminOnly = [checkUserJWT, checkUserPermission(["admin"])];
+router.get("/attendance/status", ...staffOnly, handleCheckStatus);
+router.post("/attendance/check-in", ...staffOnly, handleCheckIn);
+router.put("/attendance/check-out", ...staffOnly, handleCheckOut);
+router.get("/attendance/history", ...staffOnly, handleGetOwnAttendanceHistory);
+router.get("/manage/attendance/logs", ...adminOnly, handleGetAttendanceLogs);
+router.get("/manage/attendance/summary", ...adminOnly, handleGetAttendanceSummary);
 export default router;

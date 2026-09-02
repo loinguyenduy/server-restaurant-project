@@ -1,5 +1,5 @@
 import { Op } from "sequelize";
-import { Reservation, Table, User, sequelize } from "../models/index.js";
+import { Order, Reservation, Table, User, sequelize } from "../models/index.js";
 import {
   DINNER_SLOTS,
   LUNCH_SLOTS,
@@ -17,6 +17,9 @@ import {
 const ACTIVE_STATUSES = ["pending", "confirmed", "seated"];
 const ALL_STATUSES = ["pending", "confirmed", "seated", "completed", "cancelled", "no_show"];
 const MANAGED_SCOPES = ["all", "today", "upcoming", "past"];
+const ASSIGNED_STATUSES = ["confirmed", "seated"];
+const ACTIVE_ORDER_STATUSES = ["pending", "pending_payment", "confirmed", "preparing", "processing", "ready"];
+const SEATING_EARLY_MINUTES = 30;
 const makeResult = (EC, EM, DT = "") => ({ EC, EM, DT });
 
 const rollbackIfNeeded = async (transaction) => {
@@ -28,10 +31,13 @@ const serializeReservation = (reservation) => {
   if (!value) return value;
   const now = getRestaurantWallClockNow();
   const reservationTime = new Date(value.reservation_time);
+  const seatingOpensAt = addWallClockMinutes(reservationTime, -SEATING_EARLY_MINUTES);
   return {
     ...value,
     can_customer_cancel: ["pending", "confirmed"].includes(value.status) && now < reservationTime,
     can_mark_no_show: value.status === "confirmed" && now >= addWallClockMinutes(reservationTime, NO_SHOW_GRACE_MINUTES),
+    can_seat: value.status === "confirmed" && Boolean(value.table_id) && now >= seatingOpensAt,
+    seating_opens_at: seatingOpensAt,
   };
 };
 
@@ -132,7 +138,11 @@ const createReservationService = async (userId, bookingData) => {
 
 const getUserReservationsService = async (userId) => {
   try {
-    const reservations = await Reservation.findAll({ where: { user_id: userId }, order: [["reservation_time", "DESC"]] });
+    const reservations = await Reservation.findAll({
+      where: { user_id: userId },
+      include: [{ model: Table, attributes: ["id", "table_number", "capacity"] }],
+      order: [["reservation_time", "DESC"]],
+    });
     return makeResult(0, "Reservations retrieved successfully.", reservations.map(serializeReservation));
   } catch (error) {
     console.error("Error while retrieving customer reservations:", error);
@@ -218,13 +228,228 @@ const getAllReservationsService = async (options = {}) => {
       order: [["reservation_time", scope === "past" ? "DESC" : "ASC"]],
       limit,
       offset: (page - 1) * limit,
-      include: [{ model: User, attributes: ["id", "username", "full_name"] }],
+      include: [
+        { model: User, attributes: ["id", "username", "full_name"] },
+        { model: Table, attributes: ["id", "table_number", "capacity", "status"] },
+      ],
       distinct: true,
     });
     return makeResult(0, "Reservations retrieved successfully.", { page, limit, totalRows: count, totalPages: Math.ceil(count / limit), reservations: rows.map(serializeReservation) });
   } catch (error) {
     console.error("Error while retrieving managed reservations:", error);
     return makeResult(500, "Unable to retrieve reservations.");
+  }
+};
+
+const getAssignmentWindow = (reservation) => {
+  const start = new Date(reservation.reservation_time);
+  return { start, end: addWallClockMinutes(start, RESERVATION_DURATION_MINUTES) };
+};
+
+const getOverlapWhere = (reservation, tableIds) => {
+  const { start, end } = getAssignmentWindow(reservation);
+  return {
+    id: { [Op.ne]: reservation.id },
+    table_id: { [Op.in]: tableIds },
+    status: { [Op.in]: ASSIGNED_STATUSES },
+    reservation_time: {
+      [Op.lt]: end,
+      [Op.gt]: addWallClockMinutes(start, -RESERVATION_DURATION_MINUTES),
+    },
+  };
+};
+
+const getSuitableTablesService = async (reservationId) => {
+  try {
+    const reservation = await Reservation.findByPk(reservationId);
+    if (!reservation) return makeResult(404, "Reservation not found.", []);
+    if (reservation.status !== "confirmed") return makeResult(409, "Only confirmed reservations can be assigned a table.", []);
+
+    const tables = await Table.findAll({
+      where: {
+        capacity: { [Op.gte]: reservation.number_of_people },
+        status: { [Op.in]: ["available", "occupied"] },
+      },
+      attributes: ["id", "table_number", "capacity", "status"],
+      order: [["capacity", "ASC"], ["table_number", "ASC"]],
+    });
+    const tableIds = tables.map((table) => table.id);
+    const conflicts = tableIds.length
+      ? await Reservation.findAll({
+        where: getOverlapWhere(reservation, tableIds),
+        attributes: ["id", "table_id", "reservation_time", "status"],
+      })
+      : [];
+    const conflictedTableIds = new Set(conflicts.map((item) => item.table_id));
+    const { start, end } = getAssignmentWindow(reservation);
+    const suitableTables = tables
+      .filter((table) => !conflictedTableIds.has(table.id))
+      .map((table) => ({
+        ...table.get({ plain: true }),
+        physical_status: table.status,
+        interval_conflict: false,
+        interval_start: start,
+        interval_end: end,
+        is_current_assignment: table.id === reservation.table_id,
+      }));
+    return makeResult(0, "Suitable tables retrieved successfully.", suitableTables);
+  } catch (error) {
+    console.error("Error while retrieving suitable tables:", error);
+    return makeResult(500, "Unable to retrieve suitable tables.", []);
+  }
+};
+
+const assignReservationTableService = async (reservationId, tableId) => {
+  const snapshot = await Reservation.findByPk(reservationId, { attributes: ["id", "table_id"] });
+  if (!snapshot) return makeResult(404, "Reservation not found.");
+
+  const transaction = await sequelize.transaction();
+  try {
+    const tableIds = [...new Set([snapshot.table_id, tableId].filter(Boolean))].sort();
+    const lockedTables = await Table.findAll({
+      where: { id: { [Op.in]: tableIds } },
+      order: [["id", "ASC"]],
+      transaction,
+      lock: transaction.LOCK.UPDATE,
+    });
+    const candidate = lockedTables.find((table) => table.id === tableId);
+    if (!candidate) {
+      await transaction.rollback();
+      return makeResult(404, "Table not found.");
+    }
+
+    const targetSnapshot = await Reservation.findByPk(reservationId, { transaction });
+    if (!targetSnapshot) {
+      await transaction.rollback();
+      return makeResult(404, "Reservation not found.");
+    }
+    const relevantReservations = await Reservation.findAll({
+      where: {
+        [Op.or]: [
+          { id: reservationId },
+          getOverlapWhere(targetSnapshot, [tableId]),
+        ],
+      },
+      order: [["id", "ASC"]],
+      transaction,
+      lock: transaction.LOCK.UPDATE,
+    });
+    const reservation = relevantReservations.find((item) => item.id === reservationId);
+    if (!reservation || reservation.status !== "confirmed") {
+      await transaction.rollback();
+      return makeResult(409, "Only confirmed reservations can be assigned a table.");
+    }
+    if (reservation.table_id && !tableIds.includes(reservation.table_id)) {
+      await transaction.rollback();
+      return makeResult(409, "The reservation assignment changed. Refresh and try again.");
+    }
+    if (!["available", "occupied"].includes(candidate.status)) {
+      await transaction.rollback();
+      return makeResult(409, "This table is not available for reservation assignment.");
+    }
+    if (Number(candidate.capacity) < Number(reservation.number_of_people)) {
+      await transaction.rollback();
+      return makeResult(409, "This table is too small for the reservation party.");
+    }
+    const hasConflict = relevantReservations.some((item) => item.id !== reservation.id && item.table_id === tableId);
+    if (hasConflict) {
+      await transaction.rollback();
+      return makeResult(409, "This table has just been assigned to an overlapping reservation.");
+    }
+
+    await reservation.update({ table_id: tableId }, { transaction });
+    await transaction.commit();
+    const result = await Reservation.findByPk(reservation.id, {
+      include: [
+        { model: User, attributes: ["id", "username", "full_name", "email", "phone_number"] },
+        { model: Table, attributes: ["id", "table_number", "capacity", "status"] },
+      ],
+    });
+    return makeResult(0, "Table assigned successfully.", serializeReservation(result));
+  } catch (error) {
+    await rollbackIfNeeded(transaction);
+    console.error("Error while assigning reservation table:", error);
+    return makeResult(500, "Unable to assign the table.");
+  }
+};
+
+const seatReservationService = async (reservationId) => {
+  const snapshot = await Reservation.findByPk(reservationId, { attributes: ["id", "table_id"] });
+  if (!snapshot) return makeResult(404, "Reservation not found.");
+  if (!snapshot.table_id) return makeResult(409, "Assign a table before seating the guests.");
+
+  const transaction = await sequelize.transaction();
+  try {
+    const table = await Table.findByPk(snapshot.table_id, { transaction, lock: transaction.LOCK.UPDATE });
+    if (!table) {
+      await transaction.rollback();
+      return makeResult(404, "Assigned table not found.");
+    }
+    const lockedReservations = await Reservation.findAll({
+      where: {
+        [Op.or]: [
+          { id: reservationId },
+          { table_id: snapshot.table_id, status: "seated", id: { [Op.ne]: reservationId } },
+        ],
+      },
+      order: [["id", "ASC"]],
+      transaction,
+      lock: transaction.LOCK.UPDATE,
+    });
+    const reservation = lockedReservations.find((item) => item.id === reservationId);
+    if (!reservation) {
+      await transaction.rollback();
+      return makeResult(404, "Reservation not found.");
+    }
+    if (reservation.table_id !== snapshot.table_id) {
+      await transaction.rollback();
+      return makeResult(409, "The assigned table changed. Refresh and try again.");
+    }
+    if (reservation.status !== "confirmed") {
+      await transaction.rollback();
+      return makeResult(409, `A ${reservation.status} reservation cannot be seated.`);
+    }
+    if (getRestaurantWallClockNow() < addWallClockMinutes(reservation.reservation_time, -SEATING_EARLY_MINUTES)) {
+      await transaction.rollback();
+      return makeResult(409, "Guests can be seated from 30 minutes before the reservation time.");
+    }
+    if (table.status !== "available") {
+      await transaction.rollback();
+      return makeResult(409, "The assigned table must be available before seating guests.");
+    }
+    if (Number(table.capacity) < Number(reservation.number_of_people)) {
+      await transaction.rollback();
+      return makeResult(409, "The assigned table no longer has enough capacity.");
+    }
+    if (lockedReservations.some((item) => item.id !== reservation.id && item.status === "seated")) {
+      await transaction.rollback();
+      return makeResult(409, "Another seated reservation is already using this table.");
+    }
+    const activeOrders = await Order.findAll({
+      where: { table_id: table.id, order_status: { [Op.in]: ACTIVE_ORDER_STATUSES } },
+      order: [["id", "ASC"]],
+      transaction,
+      lock: transaction.LOCK.UPDATE,
+    });
+    if (activeOrders.length) {
+      await transaction.rollback();
+      return makeResult(409, "This table has an active order and cannot seat another party.");
+    }
+
+    await reservation.update({ status: "seated" }, { transaction });
+    await table.update({ status: "occupied" }, { transaction });
+    await transaction.commit();
+    const result = await Reservation.findByPk(reservation.id, {
+      include: [
+        { model: User, attributes: ["id", "username", "full_name", "email", "phone_number"] },
+        { model: Table, attributes: ["id", "table_number", "capacity", "status"] },
+      ],
+    });
+    return makeResult(0, "Guests seated successfully.", serializeReservation(result));
+  } catch (error) {
+    await rollbackIfNeeded(transaction);
+    console.error("Error while seating reservation guests:", error);
+    return makeResult(500, "Unable to seat the guests.");
   }
 };
 
@@ -289,12 +514,15 @@ const expirePendingReservationService = async (reservationId) => {
 };
 
 export {
+  assignReservationTableService,
   cancelReservationService,
   checkAvailabilityService,
   createReservationService,
   expirePendingReservationService,
   getAllReservationsService,
   getManagedReservationDetailsService,
+  getSuitableTablesService,
   getUserReservationsService,
+  seatReservationService,
   updateReservationStatusService,
 };

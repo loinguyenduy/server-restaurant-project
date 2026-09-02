@@ -10,6 +10,8 @@ import userRoute from "./userRoute.js"
 import dashboardRoute from "./dashboardRoute.js";
 import attendanceRoute from "./attendanceRoute.js";
 import tableRoute from "./tableRoute.js";
+import inventoryRoute from "./inventoryRoute.js";
+import reviewRoute from "./reviewRoute.js";
 
 const router = express.Router();
 const apiRoutes = (app) => {
@@ -35,6 +37,8 @@ const apiRoutes = (app) => {
   router.use("/", attendanceRoute)
   //table routes
   router.use("/", tableRoute)
+  router.use("/", inventoryRoute)
+  router.use("/", reviewRoute)
 
   return app.use("/api/v1/", router);
 };

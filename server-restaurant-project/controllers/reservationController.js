@@ -1,10 +1,13 @@
 import {
+  assignReservationTableService,
   cancelReservationService,
   checkAvailabilityService,
   createReservationService,
   getAllReservationsService,
   getManagedReservationDetailsService,
+  getSuitableTablesService,
   getUserReservationsService,
+  seatReservationService,
   updateReservationStatusService,
 } from "../services/reservationService.js";
 import { emitToOperations, emitToUser } from "../socket/socket.js";
@@ -88,6 +91,52 @@ const handleGetManagedReservationDetails = async (req, res) => {
   }
 };
 
+const handleGetSuitableTables = async (req, res) => {
+  try {
+    if (!uuidPattern.test(req.params.id || "")) return res.status(400).json({ EC: 400, EM: "A valid reservation ID is required.", DT: [] });
+    return sendResult(res, await getSuitableTablesService(req.params.id));
+  } catch (error) {
+    console.error("Error in suitable tables controller:", error);
+    return res.status(500).json({ EC: 500, EM: "Server error.", DT: [] });
+  }
+};
+
+const handleAssignReservationTable = async (req, res) => {
+  try {
+    if (!uuidPattern.test(req.params.id || "")) return res.status(400).json({ EC: 400, EM: "A valid reservation ID is required.", DT: "" });
+    const tableId = String(req.body?.table_id || "").trim();
+    if (!uuidPattern.test(tableId)) return res.status(400).json({ EC: 400, EM: "A valid table ID is required.", DT: "" });
+    const result = await assignReservationTableService(req.params.id, tableId);
+    if (result.EC === 0) {
+      const payload = { reservationId: result.DT.id, tableId: result.DT.table_id, changedAt: new Date().toISOString() };
+      emitToUser(result.DT.user_id, "reservation:assigned", payload);
+      emitToOperations("reservation:assigned", payload);
+    }
+    return sendResult(res, result);
+  } catch (error) {
+    console.error("Error in assign reservation table controller:", error);
+    return res.status(500).json({ EC: 500, EM: "Server error.", DT: "" });
+  }
+};
+
+const handleSeatReservation = async (req, res) => {
+  try {
+    if (!uuidPattern.test(req.params.id || "")) return res.status(400).json({ EC: 400, EM: "A valid reservation ID is required.", DT: "" });
+    const result = await seatReservationService(req.params.id);
+    if (result.EC === 0) {
+      const changedAt = new Date().toISOString();
+      const reservationPayload = { reservationId: result.DT.id, status: result.DT.status, changedAt };
+      emitToUser(result.DT.user_id, "reservation:status_changed", reservationPayload);
+      emitToOperations("reservation:status_changed", reservationPayload);
+      emitToOperations("table:status_changed", { tableId: result.DT.table_id, status: "occupied", changeType: "reservation_seated", changedAt });
+    }
+    return sendResult(res, result);
+  } catch (error) {
+    console.error("Error in seat reservation controller:", error);
+    return res.status(500).json({ EC: 500, EM: "Server error.", DT: "" });
+  }
+};
+
 const handleUpdateReservationStatus = async (req, res) => {
   try {
     if (!uuidPattern.test(req.params.id || "")) return res.status(400).json({ EC: 400, EM: "A valid reservation ID is required.", DT: "" });
@@ -106,11 +155,14 @@ const handleUpdateReservationStatus = async (req, res) => {
 };
 
 export {
+  handleAssignReservationTable,
   handleCancelReservation,
   handleCheckAvailability,
   handleCreateReservation,
   handleGetAllReservations,
   handleGetManagedReservationDetails,
+  handleGetSuitableTables,
   handleGetUserReservations,
+  handleSeatReservation,
   handleUpdateReservationStatus,
 };
