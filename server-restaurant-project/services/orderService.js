@@ -169,6 +169,39 @@ const serializeOrder = (order) => {
   };
 };
 
+const kitchenStatusForLegacyOrder = (status) => status === "ready" ? "ready" : ["preparing", "processing"].includes(status) ? "preparing" : "confirmed";
+const serializeKitchenOrder = (order) => {
+  const plain = serializeOrder(order);
+  const grouped = new Map();
+  for (const item of plain.OrderItems || []) {
+    const batchKey = item.kitchen_batch_id || "__legacy__";
+    if (!grouped.has(batchKey)) grouped.set(batchKey, []);
+    grouped.get(batchKey).push(item);
+  }
+  const kitchenBatches = [...grouped.entries()].map(([batchKey, items]) => {
+    const isLegacy = batchKey === "__legacy__";
+    const statuses = [...new Set(items.map((item) => item.kitchen_status).filter(Boolean))];
+    const createdTimes = items.map((item) => new Date(item.createdAt).getTime()).filter(Number.isFinite);
+    const hasInconsistentStatus = !isLegacy && statuses.length !== 1;
+    return {
+      batch_id: isLegacy ? null : batchKey,
+      kind: isLegacy ? "legacy" : batchKey === plain.id ? "initial" : "added",
+      status: isLegacy || hasInconsistentStatus ? kitchenStatusForLegacyOrder(plain.order_status) : statuses[0],
+      has_inconsistent_status: hasInconsistentStatus,
+      created_at: createdTimes.length ? new Date(Math.min(...createdTimes)).toISOString() : plain.createdAt,
+      item_count: items.reduce((total, item) => total + Number(item.quantity || 0), 0),
+      items,
+    };
+  }).sort((left, right) => {
+    if (left.kind === "initial" && right.kind !== "initial") return -1;
+    if (right.kind === "initial" && left.kind !== "initial") return 1;
+    if (left.kind === "legacy" && right.kind !== "legacy") return -1;
+    if (right.kind === "legacy" && left.kind !== "legacy") return 1;
+    return new Date(left.created_at) - new Date(right.created_at) || String(left.batch_id).localeCompare(String(right.batch_id));
+  });
+  return { ...plain, kitchen_batches: kitchenBatches };
+};
+
 const loadOrderDetails = async (orderId, where = {}) => {
   const order = await Order.findOne({
     where: { id: orderId, ...where },
@@ -299,6 +332,8 @@ const createOrderAndPaymentService = async (userId, checkoutData) => {
       quantity: item.quantity,
       price: item.price,
       prep_time_minutes: item.prep_time_minutes,
+      kitchen_batch_id: newOrder.id,
+      kitchen_status: "confirmed",
     })), { transaction });
     for (const item of orderItems) {
       await applyStockChange({
@@ -635,7 +670,7 @@ const getKitchenOrdersService = async () => {
       order: [["createdAt", "ASC"]],
       include: ORDER_DETAIL_INCLUDE,
     });
-    return makeResult(0, "Kitchen orders retrieved successfully.", orders.map(serializeOrder));
+    return makeResult(0, "Kitchen orders retrieved successfully.", orders.map(serializeKitchenOrder));
   } catch (error) {
     console.error("Error while retrieving kitchen orders:", error);
     return makeResult(500, "Unable to retrieve kitchen orders.");
@@ -673,6 +708,10 @@ const updateOrderStatusService = async (orderId, newStatus, actor) => {
     if (!(allowedTransitions[order.order_status] || []).includes(newStatus)) {
       await transaction.rollback();
       return makeResult(409, `Cannot change ${order.order_status} to ${newStatus}.`);
+    }
+    if (["preparing", "ready"].includes(newStatus) && order.OrderItems.some((item) => item.kitchen_batch_id)) {
+      await transaction.rollback();
+      return makeResult(409, "Use the kitchen batch action for batched orders.");
     }
 
     const fromStatus = order.order_status;

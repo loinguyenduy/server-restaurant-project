@@ -9,7 +9,7 @@ import {
   reCreatePaymentLinkService,
   updateOrderStatusService,
 } from "../services/orderService.js";
-import { addDineInItemsService, checkoutDineInOrderService, createDineInOrderService } from "../services/dineInOrderService.js";
+import { addDineInItemsService, checkoutDineInOrderService, createDineInOrderService, updateKitchenBatchStatusService } from "../services/dineInOrderService.js";
 import {
   emitProductAvailability,
   emitToKitchen,
@@ -219,7 +219,7 @@ const handleAddDineInItems = async (req, res) => {
     const result = await addDineInItemsService(req.user.id, req.params.id, req.body);
     if (result.EC === 0) {
       emitProductChanges(result.DT.productChanges);
-      const payload = { orderId: result.DT.order.id, addedItemCount: result.DT.addedItemCount, changedAt: new Date().toISOString() };
+      const payload = { orderId: result.DT.order.id, batchId: result.DT.kitchenBatchId, addedItemCount: result.DT.addedItemCount, changedAt: new Date().toISOString() };
       emitToKitchen("order:items_added", payload);
       emitToOperations("order:items_added", payload);
       if (result.DT.statusChanged) emitOrderStatus(result.DT.order);
@@ -227,6 +227,31 @@ const handleAddDineInItems = async (req, res) => {
     return sendResult(res, result);
   } catch (error) {
     console.error("Error in add dine-in items controller:", error);
+    return res.status(500).json({ EC: 500, EM: "Server error.", DT: "" });
+  }
+};
+
+const handleUpdateKitchenBatchStatus = async (req, res) => {
+  try {
+    if (!uuidPattern.test(req.params.id || "") || !uuidPattern.test(req.params.batchId || "")) {
+      return res.status(400).json({ EC: 400, EM: "Valid order and kitchen batch IDs are required.", DT: "" });
+    }
+    const status = String(req.body?.status || "").trim().toLowerCase();
+    const result = await updateKitchenBatchStatusService(req.user.id, req.params.id, req.params.batchId, status);
+    if (result.EC === 0) {
+      const payload = {
+        orderId: result.DT.order.id,
+        batchId: result.DT.kitchenBatchId,
+        kitchenStatus: result.DT.kitchenStatus,
+        changedAt: new Date().toISOString(),
+      };
+      emitToKitchen("order:kitchen_batch_changed", payload);
+      emitToOperations("order:kitchen_batch_changed", payload);
+      if (result.DT.orderStatusChanged) emitOrderStatus(result.DT.order);
+    }
+    return sendResult(res, result);
+  } catch (error) {
+    console.error("Error in kitchen batch status controller:", error);
     return res.status(500).json({ EC: 500, EM: "Server error.", DT: "" });
   }
 };
@@ -271,4 +296,5 @@ export {
   handleGetUserOrders,
   handleRePayOrder,
   handleUpdateOrderStatus,
+  handleUpdateKitchenBatchStatus,
 };

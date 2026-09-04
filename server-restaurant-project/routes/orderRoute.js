@@ -12,6 +12,7 @@ import {
   handleGetUserOrders,
   handleRePayOrder,
   handleUpdateOrderStatus,
+  handleUpdateKitchenBatchStatus,
 } from "../controllers/orderController.js";
 import { checkUserJWT, checkUserPermission } from "../middleware/jwtAction.js";
 
@@ -30,6 +31,7 @@ router.post("/orders/re-pay", checkUserJWT, customerOnly, handleRePayOrder);
 router.get("/manage/orders", checkUserJWT, checkUserPermission(["admin", "staff"]), handleGetAllOrders);
 router.get("/manage/orders/kitchen", checkUserJWT, checkUserPermission(["admin", "staff"]), handleGetKitchenOrders);
 router.get("/manage/orders/:id", checkUserJWT, checkUserPermission(["admin", "staff"]), handleGetManagedOrderDetails);
+router.put("/manage/orders/:id/kitchen-batches/:batchId/status", checkUserJWT, checkUserPermission(["admin", "staff"]), handleUpdateKitchenBatchStatus);
 router.put("/manage/orders/:id/status", checkUserJWT, checkUserPermission(["admin", "staff"]), handleUpdateOrderStatus);
 router.post("/manage/orders/:id/items", checkUserJWT, checkUserPermission(["admin", "staff"]), handleAddDineInItems);
 router.post("/manage/orders/:id/checkout", checkUserJWT, checkUserPermission(["admin", "staff"]), handleCheckoutDineInOrder);

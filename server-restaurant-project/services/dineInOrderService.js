@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { Op } from "sequelize";
 import {
   Order,
@@ -20,6 +21,14 @@ const ACTIVE_ORDER_STATUSES = ["pending", "pending_payment", "confirmed", "prepa
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const makeResult = (EC, EM, DT = "") => ({ EC, EM, DT });
 const rollbackIfNeeded = async (transaction) => { if (transaction && !transaction.finished) await transaction.rollback(); };
+const kitchenStatusForOrder = (status) => status === "ready" ? "ready" : ["preparing", "processing"].includes(status) ? "preparing" : "confirmed";
+const aggregateKitchenStatus = (items) => {
+  const statuses = items.map((item) => item.kitchen_status).filter(Boolean);
+  if (statuses.length === 0) return null;
+  if (statuses.every((status) => status === "ready")) return "ready";
+  if (statuses.every((status) => status === "confirmed")) return "confirmed";
+  return "preparing";
+};
 
 const orderInclude = [
   { model: OrderItem, include: [{ model: Product, attributes: ["id", "name", "image_url", "prep_time_minutes"] }] },
@@ -217,6 +226,8 @@ const createDineInOrderService = async (staffId, input = {}) => {
       quantity: item.quantity,
       price: item.price,
       prep_time_minutes: item.prep_time_minutes,
+      kitchen_batch_id: order.id,
+      kitchen_status: "confirmed",
     })), { transaction });
     for (const item of validated.snapshots) {
       await applyStockChange({ product: item.product, quantityChange: -item.quantity, type: "SALE", referenceType: "ORDER", referenceId: order.id, note: "Initial dine-in items sent to kitchen.", actorId: staffId, transaction });
@@ -293,6 +304,34 @@ const addDineInItemsService = async (staffId, orderId, input = {}) => {
     const products = await Product.findAll({ where: { id: { [Op.in]: normalized.items.map((item) => item.product_id) } }, order: [["id", "ASC"]], transaction, lock: transaction.LOCK.UPDATE });
     const validated = validateAndSnapshotProducts(products, normalized.items);
     if (validated.error) { await transaction.rollback(); return makeResult(409, validated.error); }
+    const existingItems = await OrderItem.findAll({ where: { order_id: order.id }, order: [["id", "ASC"]], transaction, lock: transaction.LOCK.UPDATE });
+    const legacyItems = existingItems.filter((item) => !item.kitchen_batch_id && !item.kitchen_status);
+    const partiallyBatchedItems = existingItems.filter((item) => Boolean(item.kitchen_batch_id) !== Boolean(item.kitchen_status));
+    const existingBatchStatuses = new Map();
+    existingItems.filter((item) => item.kitchen_batch_id).forEach((item) => {
+      if (!existingBatchStatuses.has(item.kitchen_batch_id)) existingBatchStatuses.set(item.kitchen_batch_id, new Set());
+      existingBatchStatuses.get(item.kitchen_batch_id).add(item.kitchen_status);
+    });
+    const hasInconsistentBatch = [...existingBatchStatuses.values()].some((statuses) => statuses.size !== 1 || statuses.has(null));
+    if (partiallyBatchedItems.length || hasInconsistentBatch || (legacyItems.length > 0 && legacyItems.length !== existingItems.length)) {
+      await transaction.rollback();
+      return makeResult(409, "Kitchen batch data is inconsistent. Contact an administrator before adding items.");
+    }
+    if (legacyItems.length) {
+      const [normalizedCount] = await OrderItem.update({
+        kitchen_batch_id: order.id,
+        kitchen_status: kitchenStatusForOrder(order.order_status),
+      }, {
+        where: { id: { [Op.in]: legacyItems.map((item) => item.id) } },
+        transaction,
+      });
+      if (normalizedCount !== legacyItems.length) throw new Error("Legacy kitchen items were not normalized as one atomic batch.");
+      legacyItems.forEach((item) => {
+        item.kitchen_batch_id = order.id;
+        item.kitchen_status = kitchenStatusForOrder(order.order_status);
+      });
+    }
+    const kitchenBatchId = randomUUID();
     await OrderItem.bulkCreate(validated.snapshots.map((item) => ({
       order_id: order.id,
       product_id: item.product_id,
@@ -300,6 +339,8 @@ const addDineInItemsService = async (staffId, orderId, input = {}) => {
       quantity: item.quantity,
       price: item.price,
       prep_time_minutes: item.prep_time_minutes,
+      kitchen_batch_id: kitchenBatchId,
+      kitchen_status: "confirmed",
     })), { transaction });
     for (const item of validated.snapshots) {
       await applyStockChange({ product: item.product, quantityChange: -item.quantity, type: "SALE", referenceType: "ORDER", referenceId: order.id, note: "Additional dine-in items sent to kitchen.", actorId: staffId, transaction });
@@ -321,28 +362,109 @@ const addDineInItemsService = async (staffId, orderId, input = {}) => {
       shipping_fee: 0,
       estimated_ready_at: currentReadyAt && currentReadyAt > nextReadyAt ? currentReadyAt : nextReadyAt,
     };
-    if (fromStatus === "ready") updateData.order_status = "preparing";
+    const aggregateStatus = aggregateKitchenStatus(allItems);
+    if (aggregateStatus && aggregateStatus !== fromStatus) updateData.order_status = aggregateStatus;
     await order.update(updateData, { transaction });
-    if (fromStatus === "ready") {
+    if (updateData.order_status) {
       await OrderStatusHistory.create({
         order_id: order.id,
-        from_status: "ready",
-        to_status: "preparing",
+        from_status: fromStatus,
+        to_status: aggregateStatus,
         changed_by: staffId,
-        note: "New items added; kitchen preparation resumed.",
+        note: "New kitchen batch added; aggregate order readiness updated.",
       }, { transaction });
     }
     await transaction.commit();
     return makeResult(0, "Additional items sent to kitchen.", {
       order: await loadDineInOrder(order.id),
+      kitchenBatchId,
       addedItemCount: validated.snapshots.reduce((total, item) => total + item.quantity, 0),
-      statusChanged: fromStatus === "ready",
+      statusChanged: Boolean(updateData.order_status),
       productChanges: productChangesFrom(validated.snapshots),
     });
   } catch (error) {
     await rollbackIfNeeded(transaction);
     console.error("Error while adding dine-in items:", error);
     return makeResult(500, "Unable to add items to the order.");
+  }
+};
+
+const updateKitchenBatchStatusService = async (actorId, orderId, batchId, nextStatus) => {
+  const allowedTransitions = { confirmed: "preparing", preparing: "ready" };
+  if (!Object.values(allowedTransitions).includes(nextStatus)) return makeResult(400, "Kitchen batch status must be preparing or ready.");
+  const transaction = await sequelize.transaction();
+  try {
+    const order = await Order.findByPk(orderId, { transaction, lock: transaction.LOCK.UPDATE });
+    if (!order) { await transaction.rollback(); return makeResult(404, "Order not found."); }
+    if (!["confirmed", "preparing", "ready"].includes(order.order_status)) {
+      await transaction.rollback();
+      return makeResult(409, "Kitchen work can only be updated for an active confirmed order.");
+    }
+
+    const batchItems = await OrderItem.findAll({
+      where: { order_id: order.id, kitchen_batch_id: batchId },
+      order: [["id", "ASC"]],
+      transaction,
+      lock: transaction.LOCK.UPDATE,
+    });
+    if (!batchItems.length) { await transaction.rollback(); return makeResult(404, "Kitchen batch not found for this order."); }
+    const currentStatuses = [...new Set(batchItems.map((item) => item.kitchen_status))];
+    if (currentStatuses.length !== 1 || !currentStatuses[0]) {
+      await transaction.rollback();
+      return makeResult(409, "Kitchen batch items do not share one consistent status.");
+    }
+    const currentStatus = currentStatuses[0];
+    if (allowedTransitions[currentStatus] !== nextStatus) {
+      await transaction.rollback();
+      return makeResult(409, `Cannot change kitchen batch ${currentStatus} to ${nextStatus}.`);
+    }
+
+    const [updatedCount] = await OrderItem.update({ kitchen_status: nextStatus }, {
+      where: {
+        order_id: order.id,
+        kitchen_batch_id: batchId,
+        id: { [Op.in]: batchItems.map((item) => item.id) },
+        kitchen_status: currentStatus,
+      },
+      transaction,
+    });
+    if (updatedCount !== batchItems.length) throw new Error("Kitchen batch was not updated atomically.");
+
+    const allItems = await OrderItem.findAll({
+      where: { order_id: order.id },
+      order: [["id", "ASC"]],
+      transaction,
+      lock: transaction.LOCK.UPDATE,
+    });
+    if (allItems.some((item) => !item.kitchen_batch_id || !item.kitchen_status)) {
+      await transaction.rollback();
+      return makeResult(409, "This order has incomplete kitchen batch data.");
+    }
+    batchItems.forEach((item) => { item.kitchen_status = nextStatus; });
+    const nextOrderStatus = aggregateKitchenStatus(allItems);
+    const previousOrderStatus = order.order_status;
+    const orderStatusChanged = nextOrderStatus !== previousOrderStatus;
+    if (orderStatusChanged) {
+      await order.update({ order_status: nextOrderStatus }, { transaction });
+      await OrderStatusHistory.create({
+        order_id: order.id,
+        from_status: previousOrderStatus,
+        to_status: nextOrderStatus,
+        changed_by: actorId,
+        note: nextOrderStatus === "ready" ? "All kitchen batches are ready." : "Kitchen batch progress updated aggregate order readiness.",
+      }, { transaction });
+    }
+    await transaction.commit();
+    return makeResult(0, nextStatus === "ready" ? "Kitchen batch marked ready." : "Kitchen batch preparation started.", {
+      order: await loadDineInOrder(order.id),
+      kitchenBatchId: batchId,
+      kitchenStatus: nextStatus,
+      orderStatusChanged,
+    });
+  } catch (error) {
+    await rollbackIfNeeded(transaction);
+    console.error("Error while updating kitchen batch:", error);
+    return makeResult(500, "Unable to update the kitchen batch.");
   }
 };
 
@@ -434,6 +556,14 @@ const checkoutDineInOrderService = async (staffId, orderId, paymentMethod) => {
   if (snapshot.order_status !== "ready" || snapshot.payment_status !== "pending") {
     return makeResult(409, "The dine-in order must be ready and unpaid before checkout.");
   }
+  const pendingKitchenWork = await OrderItem.count({
+    where: {
+      order_id: snapshot.id,
+      kitchen_batch_id: { [Op.ne]: null },
+      kitchen_status: { [Op.ne]: "ready" },
+    },
+  });
+  if (pendingKitchenWork > 0) return makeResult(409, "All kitchen batches must be ready before checkout.");
 
   let newAttempt = null;
   try {
@@ -485,6 +615,16 @@ const checkoutDineInOrderService = async (staffId, orderId, paymentMethod) => {
     if (order.fulfillment_type !== "dine_in" || order.source !== "pos" || order.order_status !== "ready" || order.payment_status !== "pending") {
       return abortCheckout(makeResult(409, "The dine-in order must be ready and unpaid before checkout."));
     }
+    const pendingLockedKitchenWork = await OrderItem.findOne({
+      where: {
+        order_id: order.id,
+        kitchen_batch_id: { [Op.ne]: null },
+        kitchen_status: { [Op.ne]: "ready" },
+      },
+      transaction,
+      lock: transaction.LOCK.UPDATE,
+    });
+    if (pendingLockedKitchenWork) return abortCheckout(makeResult(409, "All kitchen batches must be ready before checkout."));
     if (table.status !== "occupied") {
       return abortCheckout(makeResult(409, "The table session is no longer occupied."));
     }
@@ -632,4 +772,5 @@ export {
   createDineInOrderService,
   loadDineInOrder,
   processDineInPayOSWebhookService,
+  updateKitchenBatchStatusService,
 };

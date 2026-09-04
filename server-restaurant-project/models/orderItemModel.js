@@ -37,9 +37,20 @@ const OrderItem = sequelize.define(
         max: 180,
       },
     },
+    kitchen_batch_id: {
+      type: DataTypes.UUID,
+      allowNull: true,
+    },
+    kitchen_status: {
+      type: DataTypes.ENUM("confirmed", "preparing", "ready"),
+      allowNull: true,
+    },
   },
   {
     tableName: "order_items",
+    indexes: [
+      { fields: ["order_id", "kitchen_batch_id", "kitchen_status"] },
+    ],
   },
 );
 
