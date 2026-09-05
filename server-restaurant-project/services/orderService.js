@@ -503,9 +503,19 @@ const processPayOSWebhookService = async (verifiedData) => {
   const orderCode = String(verifiedData.orderCode || "");
   const order = await Order.findOne({ where: { transaction_id: orderCode } });
   if (!order && String(verifiedData.code || "") !== "00") {
-    return makeResult(0, "Non-success PayOS webhook acknowledged.", { orderId: null, transitioned: false });
+    return makeResult(0, "Non-success PayOS webhook acknowledged.", {
+      orderId: null,
+      transitioned: false,
+      unmatched: true,
+    });
   }
-  if (!order) return makeResult(404, "Order not found for this payment.");
+  if (!order) {
+    return makeResult(0, "PayOS webhook acknowledged without a matching local order.", {
+      orderId: null,
+      transitioned: false,
+      unmatched: true,
+    });
+  }
   if (order.fulfillment_type === "dine_in" && order.source === "pos") {
     return processDineInPayOSWebhookService(verifiedData, order);
   }

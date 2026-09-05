@@ -2,6 +2,11 @@ import payOSInstance from "../config/payosConfig.js";
 import { processPayOSWebhookService } from "../services/orderService.js";
 import { emitToKitchen, emitToOperations, emitToUser } from "../socket/socket.js";
 
+const sanitizeWebhookIdentifier = (value) => {
+  if (value === undefined || value === null || value === "") return null;
+  return String(value).replace(/[\r\n\t]/g, " ").slice(0, 128);
+};
+
 const handlePayOSWebhook = async (req, res) => {
   try {
     const verifiedData = await payOSInstance.webhooks.verify(req.body);
@@ -9,6 +14,13 @@ const handlePayOSWebhook = async (req, res) => {
     if (result.EC !== 0) {
       const status = [404, 409].includes(result.EC) ? result.EC : 400;
       return res.status(status).json({ success: false, message: result.EM });
+    }
+    if (result.DT?.unmatched) {
+      console.warn("Verified PayOS webhook has no matching local order; acknowledged.", {
+        orderCode: sanitizeWebhookIdentifier(verifiedData.orderCode),
+        paymentLinkId: sanitizeWebhookIdentifier(verifiedData.paymentLinkId),
+        reference: sanitizeWebhookIdentifier(verifiedData.reference),
+      });
     }
     const order = result.DT?.order;
     if (order && (result.DT.transitioned || result.DT.requires_manual_refund)) {
