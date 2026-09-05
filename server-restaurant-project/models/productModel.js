@@ -50,9 +50,20 @@ const Product = sequelize.define(
       type: DataTypes.BOOLEAN,
       defaultValue: true,
     },
+    is_featured: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
+    },
   },
   {
     tableName: "products",
+    indexes: [
+      {
+        name: "products_featured_created_at",
+        fields: ["is_featured", "created_at"],
+      },
+    ],
   },
 );
 

@@ -17,10 +17,14 @@ const getProducts = async (options = {}) => {
       100,
     );
     const whereCondition = {};
-    let orderCondition = [["createdAt", "DESC"]];
+    let orderCondition = [["createdAt", "DESC"], ["id", "DESC"]];
 
     if (options.category_id && options.category_id !== "all") {
       whereCondition.category_id = options.category_id;
+    }
+
+    if (typeof options.featured === "boolean") {
+      whereCondition.is_featured = options.featured;
     }
 
     const keyword = String(options.search || "").trim().toLowerCase();
@@ -32,8 +36,8 @@ const getProducts = async (options = {}) => {
       );
     }
 
-    if (options.sort === "price_asc") orderCondition = [["price", "ASC"]];
-    if (options.sort === "price_desc") orderCondition = [["price", "DESC"]];
+    if (options.sort === "price_asc") orderCondition = [["price", "ASC"], ["id", "ASC"]];
+    if (options.sort === "price_desc") orderCondition = [["price", "DESC"], ["id", "DESC"]];
 
     const { count, rows } = await Product.findAndCountAll({
       where: whereCondition,

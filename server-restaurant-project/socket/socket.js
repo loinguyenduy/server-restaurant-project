@@ -59,6 +59,8 @@ const emitToKitchen = (eventName, payload) => {
 };
 
 const emitProductAvailability = (payload) => {
+  // Compatibility name: this is the existing public menu invalidation signal for
+  // availability, stock and product publishing changes such as is_featured.
   if (io) io.to("public:menu").emit("product:availability_changed", payload);
 };
 

@@ -79,6 +79,15 @@ const normalizeProductPayload = (body, isUpdate = false) => {
     data.is_available = true;
   }
 
+  if (has("is_featured")) {
+    data.is_featured = parseBoolean(body.is_featured);
+    if (data.is_featured === null) {
+      return { error: "Featured status must be true or false." };
+    }
+  } else if (!isUpdate) {
+    data.is_featured = false;
+  }
+
   if (has("description")) {
     data.description = String(body.description || "").trim() || null;
     if (data.description?.length > 5000) {
@@ -104,6 +113,10 @@ const getAllProducts = async (req, res) => {
     if (req.query.limit !== undefined && (!integerPattern.test(req.query.limit) || Number(req.query.limit) < 1 || Number(req.query.limit) > 100)) {
       return res.status(400).json({ EM: "Limit must be an integer from 1 to 100.", EC: 400, DT: [] });
     }
+    const featured = req.query.featured === undefined ? undefined : parseBoolean(req.query.featured);
+    if (req.query.featured !== undefined && featured === null) {
+      return res.status(400).json({ EM: "Featured must be true or false.", EC: 400, DT: [] });
+    }
 
     const data = await getProducts({
       category_id: req.query.category_id,
@@ -111,6 +124,7 @@ const getAllProducts = async (req, res) => {
       sort: req.query.sort,
       page: req.query.page,
       limit: req.query.limit,
+      featured,
     });
     return res.status(getResponseStatus(data)).json(data);
   } catch (error) {
@@ -138,6 +152,7 @@ const createNewProduct = async (req, res) => {
         productId: data.DT.id,
         stock_quantity: data.DT.stock_quantity,
         is_available: data.DT.is_available,
+        is_featured: data.DT.is_featured,
       });
     }
     return res.status(getResponseStatus(data)).json(data);
@@ -166,6 +181,7 @@ const updateExistingProduct = async (req, res) => {
         productId: data.DT.id,
         stock_quantity: data.DT.stock_quantity,
         is_available: data.DT.is_available,
+        is_featured: data.DT.is_featured,
       });
     }
     return res.status(getResponseStatus(data)).json(data);
