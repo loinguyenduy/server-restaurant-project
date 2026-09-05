@@ -1,0 +1,11 @@
+import express from "express";
+import { handleCreateReview, handleGetManagedReviews, handleGetPublicReviews, handleGetReviewEligibility, handleUpdateOwnReview, handleUpdateReviewStatus } from "../controllers/reviewController.js";
+import { checkUserJWT, checkUserPermission } from "../middleware/jwtAction.js";
+const router = express.Router();
+router.get("/reviews", handleGetPublicReviews);
+router.get("/reviews/eligibility", checkUserJWT, checkUserPermission(["customer"]), handleGetReviewEligibility);
+router.post("/reviews", checkUserJWT, checkUserPermission(["customer"]), handleCreateReview);
+router.put("/reviews/:id", checkUserJWT, checkUserPermission(["customer"]), handleUpdateOwnReview);
+router.get("/manage/reviews", checkUserJWT, checkUserPermission(["admin"]), handleGetManagedReviews);
+router.put("/manage/reviews/:id/status", checkUserJWT, checkUserPermission(["admin"]), handleUpdateReviewStatus);
+export default router;

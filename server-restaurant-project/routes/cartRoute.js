@@ -1,18 +1,22 @@
-import { addToCart, getCart, removeCartItem, syncCart, updateCartItem } from "../controllers/cartController.js";
-import { checkUserJWT } from "../middleware/jwtAction.js";
 import express from "express";
-
+import {
+  addToCart,
+  getCart,
+  removeCartItem,
+  syncCart,
+  updateCartItem,
+  validateGuestCart,
+} from "../controllers/cartController.js";
+import { checkUserJWT, checkUserPermission } from "../middleware/jwtAction.js";
 
 const router = express.Router();
-//Get cart
-router.get("/get-cart", checkUserJWT, getCart);
-//Add to cart
-router.post("/add-to-cart", checkUserJWT, addToCart)
-//Update cart item
-router.put("/update-cart-item", checkUserJWT, updateCartItem)
-//Remove product in cart
-router.delete("/remove/:product_id", checkUserJWT, removeCartItem)
-//Sync cart data from local storage to database when user login
-router.post("/sync-cart", checkUserJWT, syncCart)
+const customerOnly = [checkUserJWT, checkUserPermission(["customer"])];
+
+router.post("/cart/validate", validateGuestCart);
+router.get("/get-cart", ...customerOnly, getCart);
+router.post("/add-to-cart", ...customerOnly, addToCart);
+router.put("/update-cart-item", ...customerOnly, updateCartItem);
+router.delete("/remove/:product_id", ...customerOnly, removeCartItem);
+router.post("/sync-cart", ...customerOnly, syncCart);
 
 export default router;

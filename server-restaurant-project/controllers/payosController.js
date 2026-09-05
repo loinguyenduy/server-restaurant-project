@@ -1,84 +1,42 @@
 import payOSInstance from "../config/payosConfig.js";
-import { createPaymentLinkService } from "../services/payosService.js";
-import { Order, Cart, CartItem } from "../models/index.js";
-
-const handleCreatePayment = async (req, res) => {
-    try {
-        const { amount, orderId } = req.body;
-        if (!amount || !orderId) {
-            return res.status(400).json({
-                EC: 1,
-                EM: "Missing required parameters: amount or orderId",
-                DT: ""
-            });
-        }
-        const result = await createPaymentLinkService(amount, orderId);
-        return res.status(200).json({
-            EC: result.EC,
-            EM: result.EM,
-            DT: result.DT
-        });
-    } catch (error) {
-        console.error(">>> Error from Payment Controller:", error);
-        return res.status(500).json({
-            EC: -1,
-            EM: "Internal server error",
-            DT: ""
-        });
-    }
-};
+import { processPayOSWebhookService } from "../services/orderService.js";
+import { emitToKitchen, emitToOperations, emitToUser } from "../socket/socket.js";
 
 const handlePayOSWebhook = async (req, res) => {
-    try {
-        const webhookData = req.body; //req.body contain the data sent by PayOS in the webhook
-
-        // Verify the webhook signature and check the payment status 
-        const verifiedData = await payOSInstance.webhooks.verify(webhookData);
-
-        const { orderCode, amount, code } = verifiedData;
-
-        if (code === "00") {
-            console.log(`>>> Webhook verified. Success payment for OrderCode: ${orderCode}`);
-            
-            const existingOrder = await Order.findOne({
-                where: { transaction_id: String(orderCode) }
-            });
-
-            if (existingOrder) {
-                await existingOrder.update({
-                    payment_status: "paid",
-                    order_status: "processing"
-                });
-
-                const userCart = await Cart.findOne({
-                    where: { user_id: existingOrder.user_id }
-                });
-
-                if (userCart) {
-                    await CartItem.destroy({
-                        where: { cart_id: userCart.id }
-                    });
-                    console.log(">>> Cart cleared for user:", existingOrder.user_id);
-                }
-
-                console.log(">>> Order and Cart updated successfully!");
-            } else {
-                console.warn(">>> Order not found for transaction_id:", orderCode);
-            }
-        }
-
-        return res.status(200).json({
-            success: true,
-            message: "Webhook processed"
-        });
-
-    } catch (error) {
-        console.error(">>> Webhook processing failed:", error);
-        return res.status(400).json({
-            success: false,
-            message: "Invalid webhook data"
-        });
+  try {
+    const verifiedData = await payOSInstance.webhooks.verify(req.body);
+    const result = await processPayOSWebhookService(verifiedData);
+    if (result.EC !== 0) {
+      const status = [404, 409].includes(result.EC) ? result.EC : 400;
+      return res.status(status).json({ success: false, message: result.EM });
     }
+    const order = result.DT?.order;
+    if (order && (result.DT.transitioned || result.DT.requires_manual_refund)) {
+      const changedAt = new Date().toISOString();
+      const paymentPayload = { orderId: order.id, paymentStatus: order.payment_status, changedAt: new Date().toISOString() };
+      emitToUser(order.user_id, "payment:status_changed", paymentPayload);
+      emitToOperations("payment:status_changed", paymentPayload);
+      if (result.DT.transitioned) {
+        const statusPayload = { orderId: order.id, newStatus: order.order_status, changedAt: new Date().toISOString() };
+        emitToUser(order.user_id, "order:status_changed", statusPayload);
+        emitToKitchen("order:status_changed", statusPayload);
+        emitToOperations("order:status_changed", statusPayload);
+        if (order.fulfillment_type !== "dine_in") emitToKitchen("order:new", { orderId: order.id, confirmedAt: changedAt });
+      }
+      if (result.DT.tableChange) {
+        emitToOperations("table:status_changed", { ...result.DT.tableChange, changedAt });
+      }
+      if (result.DT.reservationChange) {
+        const reservationPayload = { reservationId: result.DT.reservationChange.reservationId, status: result.DT.reservationChange.status, changedAt };
+        emitToUser(result.DT.reservationChange.userId, "reservation:status_changed", reservationPayload);
+        emitToOperations("reservation:status_changed", reservationPayload);
+      }
+    }
+    return res.status(200).json({ success: true, message: result.EM });
+  } catch (error) {
+    console.error("PayOS webhook verification failed:", error.message);
+    return res.status(400).json({ success: false, message: "Invalid webhook data." });
+  }
 };
 
-export { handleCreatePayment, handlePayOSWebhook };
+export { handlePayOSWebhook };

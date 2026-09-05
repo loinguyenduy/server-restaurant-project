@@ -1,0 +1,14 @@
+import express from "express";
+import { handleCheckStatus, handleCheckIn, handleCheckOut, handleGetAttendanceLogs, handleGetAttendanceOverview, handleGetAttendanceSummary, handleGetOwnAttendanceHistory } from "../controllers/attendanceController.js";
+import { checkUserJWT, checkUserPermission } from "../middleware/jwtAction.js";
+const router = express.Router();
+const staffOnly = [checkUserJWT, checkUserPermission(["staff"])];
+const adminOnly = [checkUserJWT, checkUserPermission(["admin"])];
+router.get("/attendance/status", ...staffOnly, handleCheckStatus);
+router.post("/attendance/check-in", ...staffOnly, handleCheckIn);
+router.put("/attendance/check-out", ...staffOnly, handleCheckOut);
+router.get("/attendance/history", ...staffOnly, handleGetOwnAttendanceHistory);
+router.get("/manage/attendance/logs", ...adminOnly, handleGetAttendanceLogs);
+router.get("/manage/attendance/overview", ...adminOnly, handleGetAttendanceOverview);
+router.get("/manage/attendance/summary", ...adminOnly, handleGetAttendanceSummary);
+export default router;

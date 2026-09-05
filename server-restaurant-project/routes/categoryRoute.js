@@ -1,11 +1,15 @@
 import express from "express";
-// import categoryController from "../controllers/categoryController.js";
-import { getAllCategories, createNewCategory } from "../controllers/categoryController.js";
+import { getAllCategories, createNewCategory, updateExistingCategory, deleteExistingCategory } from "../controllers/categoryController.js";
+import { checkUserJWT, checkUserPermission } from "../middleware/jwtAction.js";
 
 const router = express.Router();
-//Get categories
+
+// Public: Ai cũng xem được danh mục
 router.get("/get-categories", getAllCategories);
-//Create new category
-router.post("/create-category", createNewCategory);
+
+// Private: Chỉ Admin/Staff mới được Tạo, Sửa, Xóa
+router.post("/create-category", checkUserJWT, checkUserPermission(["admin"]), createNewCategory);
+router.put("/update-category/:id", checkUserJWT, checkUserPermission(["admin"]), updateExistingCategory);
+router.delete("/delete-category/:id", checkUserJWT, checkUserPermission(["admin"]), deleteExistingCategory);
 
 export default router;

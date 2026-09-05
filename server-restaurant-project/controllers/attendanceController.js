@@ -1,0 +1,11 @@
+import { checkCurrentStatusService, checkInService, checkOutService, getAttendanceLogService, getAttendanceOverviewService, getAttendanceSummaryService, getOwnAttendanceHistoryService } from "../services/attendanceService.js";
+const statusFor = (result) => result.EC === 0 ? 200 : [400, 403, 404, 409].includes(result.EC) ? result.EC : 500;
+const send = (res, result) => res.status(statusFor(result)).json(result);
+const handleCheckStatus = async (req, res) => send(res, await checkCurrentStatusService(req.user.id));
+const handleCheckIn = async (req, res) => send(res, await checkInService(req.user.id));
+const handleCheckOut = async (req, res) => send(res, await checkOutService(req.user.id));
+const handleGetOwnAttendanceHistory = async (req, res) => send(res, await getOwnAttendanceHistoryService(req.user.id, req.query));
+const handleGetAttendanceLogs = async (req, res) => send(res, await getAttendanceLogService(req.query));
+const handleGetAttendanceOverview = async (req, res) => send(res, await getAttendanceOverviewService(req.query));
+const handleGetAttendanceSummary = async (req, res) => send(res, await getAttendanceSummaryService(req.query));
+export { handleCheckStatus, handleCheckIn, handleCheckOut, handleGetAttendanceLogs, handleGetAttendanceOverview, handleGetAttendanceSummary, handleGetOwnAttendanceHistory };

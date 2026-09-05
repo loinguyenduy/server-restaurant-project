@@ -26,21 +26,22 @@ const Reservation = sequelize.define(
       allowNull: false,
     },
     status: {
-      type: DataTypes.ENUM("pending", "confirmed", "cancelled", "completed"),
+      type: DataTypes.ENUM("pending", "confirmed", "seated", "completed", "cancelled", "no_show"),
+      allowNull: false,
       defaultValue: "pending",
     },
-  contact_name: {
-    type: DataTypes.STRING,
-    allowLength: false, 
-  },
-  contact_phone: {
-    type: DataTypes.STRING,
-    allowLength: false,
-  },
-  note: {
-    type: DataTypes.TEXT,
-    allowLength: true,
-  }
+    contact_name: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
+    contact_phone: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
+    note: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+    },
   },
   {
     tableName: "reservations",

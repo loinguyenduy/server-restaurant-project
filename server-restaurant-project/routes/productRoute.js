@@ -1,21 +1,16 @@
 import express from "express";
-import {
-  createNewProduct,
-  getAllProducts,
-} from "../controllers/productController.js";
-import upload from "../middleware/uploadMiddleWare.js";
+import { createNewProduct, getAllProducts, updateExistingProduct, deleteExistingProduct } from "../controllers/productController.js";
+import uploadProductImage from "../middleware/uploadMiddleWare.js";
 import { checkUserJWT, checkUserPermission } from "../middleware/jwtAction.js";
 
 const router = express.Router();
-//Get all products
+
 router.get("/get-all-products", getAllProducts);
-//create new product
-router.post(
-  "/create-product",
-  checkUserJWT,
-  checkUserPermission(["admin", "staff"]),
-  upload.single("image"),
-  createNewProduct,
-);
+
+router.post("/create-product", checkUserJWT, checkUserPermission(["admin"]), uploadProductImage, createNewProduct);
+
+router.put("/update-product/:id", checkUserJWT, checkUserPermission(["admin"]), uploadProductImage, updateExistingProduct);
+
+router.delete("/delete-product/:id", checkUserJWT, checkUserPermission(["admin"]), deleteExistingProduct);
 
 export default router;

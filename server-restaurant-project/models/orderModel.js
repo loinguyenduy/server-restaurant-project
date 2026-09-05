@@ -17,6 +17,24 @@ const Order = sequelize.define(
       type: DataTypes.UUID,
       allowNull: true,
     },
+    reservation_id: {
+      type: DataTypes.UUID,
+      allowNull: true,
+      references: {
+        model: "reservations",
+        key: "id",
+      },
+      onDelete: "SET NULL",
+      onUpdate: "CASCADE",
+    },
+    guest_count: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      validate: {
+        min: 1,
+        max: 50,
+      },
+    },
     user_coupon_id: {
       type: DataTypes.BIGINT,
       allowNull: true,
@@ -24,6 +42,18 @@ const Order = sequelize.define(
     type: {
       type: DataTypes.ENUM("online", "offline"),
       allowNull: false,
+    },
+    fulfillment_type: {
+      type: DataTypes.ENUM("takeaway", "dine_in"),
+      allowNull: true,
+    },
+    source: {
+      type: DataTypes.ENUM("customer_web", "pos"),
+      allowNull: true,
+    },
+    contact_name: {
+      type: DataTypes.STRING(100),
+      allowNull: true,
     },
     total_amount: {
       type: DataTypes.DECIMAL(10, 2),
@@ -46,12 +76,12 @@ const Order = sequelize.define(
       allowNull: false,
     },
     payment_status: {
-      type: DataTypes.ENUM("pending", "paid", "failed"),
+      type: DataTypes.ENUM("pending", "paid", "failed", "refunded"),
       defaultValue: "pending",
     },
     payment_method: {
       type: DataTypes.ENUM("cash", "card", "payos"),
-      defaultValue: "cash",
+      allowNull: true,
     },
     transaction_id: {
       type: DataTypes.STRING,
@@ -70,8 +100,21 @@ const Order = sequelize.define(
       allowNull: true,
     },
     order_status: {
-      type: DataTypes.ENUM("pending", "processing", "completed", "cancelled"),
+      type: DataTypes.ENUM(
+        "pending",
+        "processing",
+        "pending_payment",
+        "confirmed",
+        "preparing",
+        "ready",
+        "completed",
+        "cancelled",
+      ),
       defaultValue: "pending",
+    },
+    estimated_ready_at: {
+      type: DataTypes.DATE,
+      allowNull: true,
     },
   },
   {
