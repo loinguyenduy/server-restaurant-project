@@ -15,6 +15,7 @@ import {
 import { sequelize } from "../config/databaseConfig.js";
 import { getCartData } from "./cartService.js";
 import { cancelDineInOrderService, processDineInPayOSWebhookService } from "./dineInOrderService.js";
+import { cancelPaymentAttempt, makeExistingAttemptSafe } from "./payosService.js";
 import { applyStockChange } from "./stockMovementService.js";
 
 const ORDER_ITEM_INCLUDE = {
@@ -419,18 +420,81 @@ const getUserOrderDetailsService = async (userId, orderId) => {
 
 const reCreatePaymentLinkService = async (userId, orderId) => {
   try {
-    const order = await Order.findOne({ where: { id: orderId, user_id: userId } });
-    if (!order) return makeResult(404, "Order not found.");
-    if (order.payment_method !== "payos") return makeResult(409, "Cash orders do not need a payment link.");
-    if (order.payment_status !== "pending" || !LEGACY_PENDING_STATUSES.includes(order.order_status)) {
+    const snapshot = await Order.findOne({ where: { id: orderId, user_id: userId } });
+    if (!snapshot) return makeResult(404, "Order not found.");
+    if (snapshot.payment_method !== "payos") return makeResult(409, "Cash orders do not need a payment link.");
+    if (snapshot.payment_status !== "pending" || !LEGACY_PENDING_STATUSES.includes(snapshot.order_status)) {
       return makeResult(409, "This order is no longer waiting for PayOS payment.");
     }
+
+    const previousTransactionId = snapshot.transaction_id || null;
+    let existingAttempt;
+    try {
+      existingAttempt = await makeExistingAttemptSafe(
+        previousTransactionId,
+        "Customer requested a replacement payment link.",
+      );
+    } catch (error) {
+      console.error("Unable to confirm the existing PayOS attempt before retry:", error.message);
+      return makeResult(500, "The existing payment state could not be confirmed. No new payment link was created.");
+    }
+    if (!existingAttempt.safe) {
+      return makeResult(409, `The existing PayOS attempt is ${existingAttempt.status}. Wait for its final status before retrying.`);
+    }
+
     const orderCode = createPayOSOrderCode();
-    const checkoutUrl = await createPayOSLink(order, orderCode);
-    await order.update({ transaction_id: String(orderCode) });
-    return makeResult(0, "Payment link created successfully.", { orderId: order.id, checkoutUrl });
+    const newTransactionId = String(orderCode);
+    let checkoutUrl;
+    try {
+      checkoutUrl = await createPayOSLink(snapshot, orderCode);
+    } catch (error) {
+      try {
+        await cancelPaymentAttempt(newTransactionId, "The replacement payment link request did not complete safely.");
+      } catch (cancelError) {
+        console.error("Unable to confirm cancellation after a replacement PayOS link error:", cancelError.message);
+      }
+      console.error("Unable to create a replacement PayOS link:", error.message);
+      return makeResult(500, "PayOS could not create a replacement link safely. Try again after checking the payment status.");
+    }
+
+    const transaction = await sequelize.transaction();
+
+    try {
+      const order = await Order.findOne({
+        where: { id: orderId, user_id: userId },
+        transaction,
+        lock: transaction.LOCK.UPDATE,
+      });
+      const transactionStillMatches = (order?.transaction_id || null) === previousTransactionId;
+      const orderStillEligible = order &&
+        order.payment_method === "payos" &&
+        order.payment_status === "pending" &&
+        LEGACY_PENDING_STATUSES.includes(order.order_status);
+
+      if (!orderStillEligible || !transactionStillMatches) {
+        await transaction.rollback();
+        try {
+          await cancelPaymentAttempt(newTransactionId, "Order state changed before the replacement link was saved.");
+        } catch (cancelError) {
+          console.error("Unable to cancel an unused replacement PayOS attempt:", cancelError.message);
+        }
+        return makeResult(409, "The order or payment state changed. Refresh before trying again.");
+      }
+
+      await order.update({ transaction_id: newTransactionId }, { transaction });
+      await transaction.commit();
+      return makeResult(0, "Payment link created successfully.", { orderId: order.id, checkoutUrl });
+    } catch (error) {
+      await rollbackIfNeeded(transaction);
+      try {
+        await cancelPaymentAttempt(newTransactionId, "The replacement payment link could not be saved.");
+      } catch (cancelError) {
+        console.error("Unable to cancel a replacement PayOS attempt after persistence failure:", cancelError.message);
+      }
+      throw error;
+    }
   } catch (error) {
-    console.error("Error while recreating a PayOS payment link:", error);
+    console.error("Error while recreating a PayOS payment link:", error.message);
     return makeResult(500, "Unable to create a new payment link.");
   }
 };
